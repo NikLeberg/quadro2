@@ -18,5 +18,5 @@
 
 
 #define FLY_TASK_PRIORITY (10U)
-TaskHandle_t xFlyTaskHandle = NULL;
-QueueHandle_t xFlyInputQueue = NULL;
+TaskHandle_t xFlyTask = NULL;
+QueueHandle_t xFlyInput = NULL;
