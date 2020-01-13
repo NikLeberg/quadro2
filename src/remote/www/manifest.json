@@ -1,0 +1,9 @@
+{
+  "name": "quadro2",
+  "description": "Quadrokopter-Projekt von Niklaus Leuenberger.",
+  "start_url": ".",
+  "display": "fullscreen",
+  "orientation": "landscape-primary",
+  "background_color": "#4caf50",
+  "theme_color": "red"
+}
