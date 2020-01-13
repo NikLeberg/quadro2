@@ -36,7 +36,7 @@
 #include "route.h"
 
 /** Interne Abhängigkeiten **/
-#include "resourcesAndTasks.h"
+#include "resources.h"
 
 #pragma once
 

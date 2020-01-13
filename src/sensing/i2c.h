@@ -18,7 +18,7 @@
 #include "driver/i2c.h"
 
 /** Interne Abhängigkeiten **/
-#include "resourcesAndTasks.h"
+#include "resources.h"
 
 #pragma once
 

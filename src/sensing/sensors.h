@@ -36,10 +36,10 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include "esp_log.h"
-#include "../../lib/yasML/matrices.h"
+//#include "../../lib/yasML/matrices.h"
 
 /** Interne Abhängigkeiten **/
-#include "resourcesAndTasks.h"
+#include "resources.h"
 #include "bno.h"
 #include "ultrasonic.h"
 

@@ -26,7 +26,7 @@
 #include "sh2_err.h"
 
 /** Interne Abhängigkeiten **/
-#include "resourcesAndTasks.h"
+#include "resources.h"
 #include "i2c.h"
 #include "sensor_types.h"
 

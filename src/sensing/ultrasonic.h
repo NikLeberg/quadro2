@@ -20,7 +20,7 @@
 #include "driver/gpio.h"
 
 /** Interne Abhängigkeiten **/
-#include "resourcesAndTasks.h"
+#include "resources.h"
 #include "sensor_types.h"
 
 
