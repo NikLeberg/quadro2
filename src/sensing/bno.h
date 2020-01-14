@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
+#include <math.h>
 #include "driver/gpio.h"
 #include "sh2.h"
 #include "sh2_hal.h"
@@ -33,8 +34,8 @@
 
 /** Variablendeklaration **/
 
-#define BNO_DATA_RATE_ORIENTATION_US 50000 // 50 ms
-#define BNO_DATA_RATE_LINEAR_ACCELERATION_US 50000 // 50 ms
+#define BNO_DATA_RATE_ORIENTATION_US 20000 // 20 ms
+#define BNO_DATA_RATE_LINEAR_ACCELERATION_US 20000 // 20 ms
 #define BNO_DATA_RATE_PRESSURE_US 100000 // 100 ms
 
 enum bno_input_type_t {
@@ -191,14 +192,12 @@ static bool bno_enableDefault();
 /** Implementierung **/
 
 static bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin) {
-    bno.activeReports.report = (struct bno_report_t*) calloc(1, sizeof(struct bno_report_t));
-    bno.activeReports.next = NULL;
-    // Input Queue erstellen
-    xBno_input = xQueueCreate(4, sizeof(struct bno_input_t));
     // Parameter speichern
     bno.address = address;
     bno.interruptPin = interruptPin;
     bno.resetPin = resetPin;
+    // Input Queue erstellen
+    xBno_input = xQueueCreate(4, sizeof(struct bno_input_t));
     // konfiguriere Pins und aktiviere Interrupts
     gpio_config_t gpioConfig;
     gpioConfig.pin_bit_mask = ((1ULL) << resetPin);

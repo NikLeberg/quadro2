@@ -68,12 +68,10 @@
 struct sensors_t {
     struct {
         int64_t lastMeasurementTimestamp;
-        Matrix *x, *xP, *F, *P, *R, *z, *K, *Q;
+        //Matrix *x, *xP, *F, *P, *R, *z, *K, *Q;
     } altitude;
 };
 struct sensors_t sensors;
-
-//static char* TAG = "sensors";
 
 
 /** Public Functions **/
@@ -117,13 +115,13 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
                   uint8_t bnoAddr, gpio_num_t bnoInterrupt, gpio_num_t bnoReset,    // BNO080
                   gpio_num_t ultTrigger, gpio_num_t ultEcho) {                      // Ultraschall
     // Input-Queue erstellen
-    xSensors_input = xQueueCreate(32, sizeof(struct sensors_input_t));
+    xSensors_input = xQueueCreate(16, sizeof(struct sensors_input_t));
     // I2C initialisieren
     i2c_init(scl, sda);
     // BNO initialisieren + Reports für Beschleunigung, Orientierung und Druck aktivieren
     if (bno_init(bnoAddr, bnoInterrupt, bnoReset)) return true;
-    // Ultraschall initialisieren (10 Hz)
-    if (ult_init(10, ultTrigger, ultEcho)) return true;
+    // Ultraschall initialisieren
+    if (ult_init(ultTrigger, ultEcho)) return true;
     // installiere task
     if (xTaskCreate(&sensors_task, "sensors", 2 * 1024, NULL, xSensors_PRIORITY, &xSensors_handle) != pdTRUE) return true;
     return false;

@@ -26,6 +26,7 @@
 
 /** Variablendeklaration **/
 
+#define ULT_DATA_RATE_MS 100 // 100 ms
 #define ULT_MAX_CM 5.0f // 5 m
 #define ULT_NO_GROUND_COUNT 256
 #define ULT_NO_GROUND_WAIT 1000 // 1 s
@@ -42,13 +43,10 @@ enum ult_task_step_t {
 };
 
 struct ult_input_t {
-//    enum ult_input_type_t type;
-//    union {
-        struct {
-            int64_t timestamp;
-            bool level;
-        };
-//    };
+    struct {
+        int64_t timestamp;
+        bool level;
+    };
 };
 
 struct ult_data_t {
@@ -75,7 +73,7 @@ static struct ult_t ult;
  *
  *   returns: false bei Erfolg, sonst true wenn Sensor nicht vorhanden
  */
-static bool ult_init(TickType_t updateFrequency, gpio_num_t triggerPin, gpio_num_t echoPin);
+static bool ult_init(gpio_num_t triggerPin, gpio_num_t echoPin);
 
 
 /** Private Functions **/
@@ -101,11 +99,12 @@ static void IRAM_ATTR ult_interrupt(void* arg);
 
 /** Implementierung **/
 
-static bool ult_init(TickType_t updateFrequency, gpio_num_t triggerPin, gpio_num_t echoPin) {
+static bool ult_init(gpio_num_t triggerPin, gpio_num_t echoPin) {
     // Parameter speichern
-    ult.updateRate = ((1000 / updateFrequency) / portTICK_PERIOD_MS); // Hz -> ms -> Ticks
     ult.triggerPin = triggerPin;
     ult.echoPin = echoPin;
+    // Input Queue erstellen
+    xUlt_input = xQueueCreate(2, sizeof(struct ult_input_t));
     // konfiguriere Pins und aktiviere Interrupts
     gpio_config_t gpioConfig;
     gpioConfig.pin_bit_mask = ((1ULL) << triggerPin);
@@ -123,8 +122,6 @@ static bool ult_init(TickType_t updateFrequency, gpio_num_t triggerPin, gpio_num
     gpio_config(&gpioConfig); // Echo Pin
     gpio_install_isr_service(ESP_INTR_FLAG_EDGE | ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LOWMED);
     if (gpio_isr_handler_add(echoPin, &ult_interrupt, NULL)) return true;
-    // Input Queue erstellen
-    xUlt_input = xQueueCreate(2, sizeof(struct ult_input_t));
     // Sende Trigger und warte auf Antwort
     gpio_set_level(ult.triggerPin, 1);
     vTaskDelay(1);
@@ -150,7 +147,7 @@ void ult_task(void* arg) {
         if (noGroundSince > ULT_NO_GROUND_COUNT) { // verringere Frequenz wenn kein Boden in messbarer Nähe
             vTaskDelayUntil(&lastWakeTime, ULT_NO_GROUND_WAIT / portTICK_PERIOD_MS);
         } else {
-            vTaskDelayUntil(&lastWakeTime, ult.updateRate);
+            vTaskDelayUntil(&lastWakeTime, ULT_DATA_RATE_MS / portTICK_PERIOD_MS);
         }
         // Starte Messung, Trigger HIGH -> LOW
         gpio_set_level(ult.triggerPin, 0);
@@ -178,7 +175,6 @@ void ult_task(void* arg) {
 static void IRAM_ATTR ult_interrupt(void* arg) {
     BaseType_t woken;
     struct ult_input_t input;
-//    input.type = ULT_INPUT_ECHO;
     input.level = gpio_get_level(ult.echoPin);
     input.timestamp = esp_timer_get_time();
     xQueueSendToBackFromISR(xUlt_input, &input, &woken);
