@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # -*- coding: utf-8 -*
 import sys
 import csv
@@ -23,11 +23,11 @@ def main():
                   [0.0],
                   [0.0]]) # Beschleunigung, Ultraschall, Barometer
     P = np.matrix([[0.1, 0.0, 0.0],
-                  [0.0, 100.0, 100.0],
+                  [0.0, 0.1, 0.0],
                   [0.0, 0.0, 0.1]]) # anfängliche Unsicherheit 0.1
-    Q = np.matrix([[100.0**2, 0.0, 0.0],
-                  [0.0, 100.0**2, 0.0],
-                  [0.0, 0.0, 100.0**2]]) # Unsicherheit der Vorraussage
+    Q = np.matrix([[10.0**2, 0.0, 0.0],
+                  [0.0, 10.0**2, 0.0],
+                  [0.0, 0.0, 10.0**2]]) # Unsicherheit der Vorraussage
     H = np.matrix([[0.0, 0.0, 1.0],
                   [1.0, 0.0, 0.0],
                   [1.0, 0.0, 0.0]])
@@ -67,29 +67,28 @@ def main():
                 xHat = F * x # Predict
                 PHat = F * P * F.T + Q
                 # Messungsunwarscheinlichkeit erhöhen
-                dM = xHat.item(0) - x.item(0)
-                R.itemset((0, 0), (math.sqrt(R.item((0, 0))) + (dM / (0.5 * dT * dT)))**2)
-                R.itemset((1, 1), (math.sqrt(R.item((1, 1))) + dM)**2)
-                R.itemset((2, 2), (math.sqrt(R.item((2, 2))) + dM)**2)
+                dM = abs(xHat.item(0) - x.item(0))
+                R[(0, 0)] = math.sqrt(R[(0, 0)] + (dM / (0.5 * dT * dT)))**2
+                R[(1, 1)] = math.sqrt(R[(1, 1)] + dM)**2
+                R[(2, 2)] = math.sqrt(R[(2, 2)] + dM)**2
                 # Zurücksetzen basierend auf Messung
                 if row[2] == 'A':
-                    R.itemset((0, 0), 0.0**2) # 0.35
+                    R[(0, 0)] = 0.35**2 # 0.35
                     z.itemset(0, float(row[5]))
                 elif row[2] == 'U':
-                    {}
-                    #R.itemset((1, 1), 5.0**2) # 0.005
-                    #z.itemset(1, float(row[3]) - offsetUltrasonic)
+                    R[(1, 1)] = 0.005**2 # 0.005
+                    z.itemset(1, float(row[3]) - offsetUltrasonic)
                 elif row[2] == 'B':
-                    {}
-                    #R.itemset((2, 2), 5.0**2)
-                    #z.itemset(2, float(row[3]) - offsetBarometer)
+                    R[(2, 2)] = 1.0**2
+                    z.itemset(2, float(row[3]) - offsetBarometer)
                 # Gain rechnen
-                K = PHat * H.T * inv(H * PHat * H.T + R)
+                S = H * P * H.T + R
+                K = (P * H.T) * inv(S)
                 P = (I - K * H) * PHat
                 x = xHat + K * (z - H * xHat)
                 # speichere für Plot
                 t.append(s)
-                f.append(x.item(0) + 0.5)
+                f.append(x.item(0))
                 v.append(x.item(1))
                 a.append(z.item(0))
                 u.append(z.item(1))
@@ -97,7 +96,7 @@ def main():
 
         plt.title('Fusion')
         plt.plot(t, f, label='Fusion')
-        plt.plot(t, v, label='Geschwindigkeit')
+        #plt.plot(t, v, label='Geschwindigkeit')
         plt.plot(t, a, label='Beschleunigung')
         plt.plot(t, u, label='Ultraschall')
         plt.plot(t, b, label='Barometer')
@@ -114,5 +113,6 @@ def main():
         # ToDo
         # Beschleunigung rechnung prüfen
         # Kalman Formeln prüfen
+        # inverse prüfen
 
 main()
