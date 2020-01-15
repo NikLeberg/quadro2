@@ -49,13 +49,8 @@ struct ult_input_t {
     };
 };
 
-struct ult_data_t {
-    uint32_t distance; // Distanz in cm
-};
-
 struct ult_t {
     gpio_num_t triggerPin, echoPin;
-    TickType_t updateRate;
 };
 static struct ult_t ult;
 
@@ -67,7 +62,6 @@ static struct ult_t ult;
  * ----------------------------
  *   Initialisiert Sensor und startet zyklisches Update.
  *
- *   TickType_t updateFrequency: Update-Frequenz
  *   gpio_num_t triggerPin: Trigger Pin, Output
  *   gpio_num_t echoPin: Echo Pin, Input
  *
