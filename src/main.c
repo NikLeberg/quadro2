@@ -61,12 +61,6 @@
     // Pinout
     https://cdn.instructables.com/FOL/YWLI/JEOILQ5U/FOLYWLIJEOILQ5U.LARGE.jpg?auto=webp&frame=1&width=1024&fit=bounds
 
-    // Maybe WS-Server?
-    https://github.com/chmorgan/libesphttpd
-
-    // It is possible to set stdin, stdout, and stderr for any given task without affecting other tasks, e.g., by doing stdin = fopen("/dev/uart/1", "r").
-    https://docs.espressif.com/projects/esp-idf/en/v4.0-beta2/api-reference/storage/vfs.html
-
 */
 
 /** Externe Abhängigkeiten **/
@@ -89,6 +83,8 @@
 #define BNO_RESET           GPIO_NUM_32
 #define ULTRASONIC_TRIGGER  GPIO_NUM_26
 #define ULTRASONIC_ECHO     GPIO_NUM_27
+#define GPS_RX_HOST_TX      GPIO_NUM_23
+#define GPS_TX_HOST_RX      GPIO_NUM_22
 
 
 
@@ -99,7 +95,10 @@ void app_main(void* arg){
 
     bool ret = false;
     ESP_LOGI("quadro2", "Starte Sensorik...");
-    ret = sensors_init(I2C_SCL, I2C_SDA, 0x4A, BNO_INTERRUPT, BNO_RESET, ULTRASONIC_TRIGGER, ULTRASONIC_ECHO);
+    ret = sensors_init(I2C_SCL, I2C_SDA,
+                       0x4A, BNO_INTERRUPT, BNO_RESET,
+                       ULTRASONIC_TRIGGER, ULTRASONIC_ECHO,
+                       GPS_TX_HOST_RX, GPS_RX_HOST_TX);
     ESP_LOGI("quadro2", "Status Sensorik: %s", ret ? "Error" : "Ok");
 
     ESP_LOGI("quadro2", "Starte Remote...");

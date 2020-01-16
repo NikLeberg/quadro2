@@ -72,6 +72,9 @@ static bool gps_init(gpio_num_t rxPin, gpio_num_t txPin);
  */
 void gps_task(void* arg);
 
+static uint32_t gps_receiveUBX(uint8_t *buffer, TickType_t timeout);
+static bool gps_sendUBX(const char *buffer, uint32_t length, bool aknowledge, TickType_t timeout);
+
 /** Implementierung **/
 
 static bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
@@ -82,15 +85,15 @@ static bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
     //xgps_input = xQueueCreate(2, sizeof(struct gps_input_t));
     // konfiguriere UART1
     uart_config_t uart_config = {
-        .baud_rate = 256000,
+        .baud_rate = 9600,
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
     };
     uart_driver_install(GPS_UART, GPS_RX_BUFFER_SIZE * 2, 0, 0, NULL, 0);
-    uart_param_config(UART_NUM_1, &uart_config);
-    uart_set_pin(UART_NUM_1, gps.txPin, gps.txPin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    uart_param_config(GPS_UART, &uart_config);
+    uart_set_pin(GPS_UART, gps.txPin, gps.txPin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     // konfigurieren
     // UBX-CFG-PRT: NMEA deaktivieren, UART Baudrate auf 256000 setzen
     const char msgPort[] = {0xB5, 0x62, 0x06, 0x00, 0x14, 0x00, 0x01,
@@ -104,15 +107,14 @@ static bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
     uart_flush(GPS_UART);
     // UBX-CFG-PMS: Power auf Balanced setzen
     const char msgPower[] = {0xB5, 0x62, 0x06, 0x86, 0x08, 0x00, 0x00, 0x01,
-                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x95, 0x61};
-    if (gps_sendUBX(msgPort, sizeof(msgPort), false, 1000 / portTICK_PERIOD_MS) ) return true; // NAK Empfangen
-    // AK / NAK empfangen
-    // UBX-CFG-MSG: Zu empfangende Nachrichten setzen
-    const char msgMessages[] = {};
-    // AK / NAK empfangen
-    // ?: Rate auf 10Hz
-    uint8_t msgRate[] = {};
-    // AK / NAK empfangen
+                             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x95, 0x61};
+    if (gps_sendUBX(msgPower, sizeof(msgPower), true, 1000 / portTICK_PERIOD_MS) ) return true; // NAK Empfangen
+    // UBX-CFG-MSG: Zu empfangende Nachrichten setzen, UBX-NAV-PVT (0x01 0x07)
+    const char msgMessages[] = {0xB5, 0x62, 0x06, 0x01, 0x03, 0x00, 0x01, 0x07, 0x01, 0x1C, 0x5A};
+    if (gps_sendUBX(msgMessages, sizeof(msgMessages), true, 1000 / portTICK_PERIOD_MS) ) return true; // NAK Empfangen
+    // UBX-CFG-RATE: Daten-Rate auf 10Hz setzen
+    const char msgRate[] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, 0x64, 0x00, 0x01, 0x00, 0x00, 0x00, 0x79, 0x10};
+    if (gps_sendUBX(msgRate, sizeof(msgRate), true, 1000 / portTICK_PERIOD_MS) ) return true; // NAK Empfangen
 
     // Task starten
     if (xTaskCreate(&gps_task, "gps", 1 * 1024, NULL, xSensors_PRIORITY + 1, &xGps_handle) != pdTRUE) return true;
@@ -127,7 +129,7 @@ void gps_task(void* arg) {
     // Loop
     while (true) {
         //
-        gps_receiveUBX(data, 10000);
+        gps_receiveUBX(data, 10000 / portTICK_PERIOD_MS);
     }
 }
 
@@ -135,9 +137,10 @@ void gps_task(void* arg) {
  * Sync1 (0xb5) | Sync 2 (0x62) | Class | ID | Size LSB | Size MSB | Payload ... | CK_A | CK_B
  * 0            | 1             | 2     | 3  | 4        | 5        | 6       ... |
  */
-uint32_t gps_receiveUBX(uint8_t *buffer, TickType_t timeout) {
+static uint32_t gps_receiveUBX(uint8_t *buffer, TickType_t timeout) {
     // Variablen
-    uint32_t bytesToRead = 1, bytesRead = 0, rxPosition = 0, rxLength;
+    uint32_t bytesToRead = 1, rxPosition = 0, rxLength;
+    int32_t bytesRead = 0;
     uint8_t ckA = 0, ckB = 0;
     TickType_t startTick = xTaskGetTickCount();
     // Lesen
@@ -148,7 +151,8 @@ uint32_t gps_receiveUBX(uint8_t *buffer, TickType_t timeout) {
         // 4. Prüfsumme überprüfen
         timeout -= xTaskGetTickCount() - startTick;
         bytesRead = uart_read_bytes(GPS_UART, buffer + rxPosition, bytesToRead, timeout);
-        ESP_LOGD("gps", "Bytes %u von %u gelesen nach Position %u: %s", bytesRead, bytesToRead, rxPosition, (char*) buffer);
+        ESP_LOGD("gps", "Bytes %u von %u gelesen nach Position %u:", bytesRead, bytesToRead, rxPosition);
+        ESP_LOG_BUFFER_HEXDUMP("gps", buffer, 128, ESP_LOG_DEBUG);
         if (bytesRead < 0) return 0; // Empfangsfehler
         else if (bytesRead < bytesToRead) return 0; // innerhalb Timeout zu wenig empfangen
         // UBX-Protokoll Header prüfen
@@ -174,7 +178,9 @@ uint32_t gps_receiveUBX(uint8_t *buffer, TickType_t timeout) {
 }
 
 
-bool gps_sendUBX(const char *buffer, uint32_t length, bool aknowledge, TickType_t timeout) {
+static bool gps_sendUBX(const char *buffer, uint32_t length, bool aknowledge, TickType_t timeout) {
+    ESP_LOGD("gps", "%u Bytes senden %s AK/NAK:", length, aknowledge ? "mit" : "ohne");
+    ESP_LOG_BUFFER_HEXDUMP("gps", buffer, length, ESP_LOG_DEBUG);
     TickType_t startTick = xTaskGetTickCount();
     if (uart_write_bytes(GPS_UART, buffer, length) < 0) return true; // Sendefehler
     if (!aknowledge) return false; // keine Antwort erforderlich

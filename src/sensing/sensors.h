@@ -42,6 +42,7 @@
 #include "resources.h"
 #include "bno.h"
 #include "ultrasonic.h"
+#include "gps.h"
 
 
 /** Variablendeklaration **/
@@ -91,7 +92,8 @@ struct sensors_t sensors;
  */
 bool sensors_init(gpio_num_t scl, gpio_num_t sda,
                   uint8_t bnoAddr, gpio_num_t bnoInterrupt, gpio_num_t bnoReset,
-                  gpio_num_t ultTrigger, gpio_num_t ultEcho);
+                  gpio_num_t ultTrigger, gpio_num_t ultEcho,
+                  gpio_num_t gpsRxPin, gpio_num_t gpsTxPin);
 
 
 /** Private Functions **/
@@ -113,15 +115,22 @@ void sensors_task(void* arg);
 
 bool sensors_init(gpio_num_t scl, gpio_num_t sda,                                   // I2C
                   uint8_t bnoAddr, gpio_num_t bnoInterrupt, gpio_num_t bnoReset,    // BNO080
-                  gpio_num_t ultTrigger, gpio_num_t ultEcho) {                      // Ultraschall
+                  gpio_num_t ultTrigger, gpio_num_t ultEcho,                        // Ultraschall
+                  gpio_num_t gpsRxPin, gpio_num_t gpsTxPin) {                       // GPS
     // Input-Queue erstellen
     xSensors_input = xQueueCreate(16, sizeof(struct sensors_input_t));
     // I2C initialisieren
+    ESP_LOGD("sensors", "I2C init");
     i2c_init(scl, sda);
     // BNO initialisieren + Reports für Beschleunigung, Orientierung und Druck aktivieren
-    if (bno_init(bnoAddr, bnoInterrupt, bnoReset)) return true;
+    ESP_LOGD("sensors", "BNO init");
+    //if (bno_init(bnoAddr, bnoInterrupt, bnoReset)) return true;
     // Ultraschall initialisieren
+    ESP_LOGD("sensors", "ULT init");
     if (ult_init(ultTrigger, ultEcho)) return true;
+    // GPS initialisieren
+    ESP_LOGD("sensors", "GPS init");
+    if (gps_init(gpsRxPin, gpsTxPin)) return true;
     // installiere task
     if (xTaskCreate(&sensors_task, "sensors", 2 * 1024, NULL, xSensors_PRIORITY, &xSensors_handle) != pdTRUE) return true;
     return false;
