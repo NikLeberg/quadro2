@@ -78,7 +78,7 @@ static bool gps_init(gpio_num_t rxPin, gpio_num_t txPin);
  */
 void gps_task(void* arg);
 
-static uint32_t gps_receiveUBX(uint8_t *buffer, TickType_t timeout);
+static uint8_t gps_receiveUBX(uint8_t **buffer, TickType_t timeout);
 static bool gps_sendUBX(uint8_t *buffer, uint8_t length, bool aknowledge, TickType_t timeout);
 static void IRAM_ATTR gps_interrupt(void* arg);
 static bool gps_uart_baudrate(uint32_t baud_rate);
@@ -94,38 +94,30 @@ static bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
     xGps_input = xQueueCreate(2, sizeof(struct gps_input_t));
     gps.txSemphr = xSemaphoreCreateMutex();
     xSemaphoreGive(gps.txSemphr);
-    //
+    // eigener UART Treiber installieren
     gps_uart_enable(gps.txPin, gps.txPin);
-
-    // konfiguriere UART1 mit ESP-IDF default Treiber aber lösche diesen danach?
-    uart_config_t uart_config = {
-        .baud_rate = 9600,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
-    };
-    uart_driver_install(GPS_UART, 2 * 128, 0, 0, NULL, 0);
-    uart_param_config(GPS_UART, &uart_config);
-    uart_set_pin(GPS_UART, gps.txPin, gps.txPin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     // konfigurieren
+    // UBX-CFG-RST: u-Blox Chip zurücksetzen - Hardware Reset
+    uint8_t msgReset[] = {0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x0C, 0x5D};
+    gps_sendUBX(msgReset, sizeof(msgReset), false, 1000 / portTICK_PERIOD_MS);
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
     // UBX-CFG-PRT: NMEA deaktivieren, UART Baudrate auf 256000 setzen
-    const char msgPort[] = {0xB5, 0x62, 0x06, 0x00, 0x14, 0x00, 0x01,
-                            0x00, 0x00, 0x00, 0xC0, 0x08, 0x00, 0x00,
-                            0x00, 0xE8, 0x03, 0x00, 0x01, 0x00, 0x01,
-                            0x00, 0x00, 0x00, 0x00, 0x00, 0xd0, 0xf8};
+    uint8_t msgPort[] = {0xB5, 0x62, 0x06, 0x00, 0x14, 0x00, 0x01,
+                         0x00, 0x00, 0x00, 0xC0, 0x08, 0x00, 0x00,
+                         0x00, 0xE8, 0x03, 0x00, 0x01, 0x00, 0x01,
+                         0x00, 0x00, 0x00, 0x00, 0x00, 0xd0, 0xf8};
     gps_sendUBX(msgPort, sizeof(msgPort), true, 1000 / portTICK_PERIOD_MS); // AK aktivieren aber nicht auswerten, so wird auf tx done gewartet
     // eigener UART auf neue Baudrate setzen und Buffer löschen
-    uart_set_baudrate(GPS_UART, 256000);
+    gps_uart_baudrate(256000);
     // UBX-CFG-PMS: Power auf Balanced setzen
-    const char msgPower[] = {0xB5, 0x62, 0x06, 0x86, 0x08, 0x00, 0x00, 0x01,
-                             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x95, 0x61};
+    uint8_t msgPower[] = {0xB5, 0x62, 0x06, 0x86, 0x08, 0x00, 0x00, 0x01,
+                          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x95, 0x61};
     if (gps_sendUBX(msgPower, sizeof(msgPower), true, portMAX_DELAY)) return true; // NAK Empfangen
     // UBX-CFG-MSG: Zu empfangende Nachrichten setzen, UBX-NAV-PVT (0x01 0x07)
-    const char msgMessages[] = {0xB5, 0x62, 0x06, 0x01, 0x03, 0x00, 0x01, 0x07, 0x01, 0x1C, 0x5A};
+    uint8_t msgMessages[] = {0xB5, 0x62, 0x06, 0x01, 0x03, 0x00, 0x01, 0x07, 0x01, 0x1C, 0x5A};
     if (gps_sendUBX(msgMessages, sizeof(msgMessages), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
     // UBX-CFG-RATE: Daten-Rate auf 10Hz setzen
-    const char msgRate[] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, 0x64, 0x00, 0x01, 0x00, 0x00, 0x00, 0x79, 0x10};
+    uint8_t msgRate[] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, 0x64, 0x00, 0x01, 0x00, 0x00, 0x00, 0x79, 0x10};
     if (gps_sendUBX(msgRate, sizeof(msgRate), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
 
     // Task starten
@@ -146,52 +138,26 @@ void gps_task(void* arg) {
  * Sync1 (0xb5) | Sync 2 (0x62) | Class | ID | Size LSB | Size MSB | Payload ... | CK_A | CK_B
  * 0            | 1             | 2     | 3  | 4        | 5        | 6       ... |
  */
-static uint32_t gps_receiveUBX(uint8_t *buffer, TickType_t timeout) {
+static uint8_t gps_receiveUBX(uint8_t **buffer, TickType_t timeout) {
     // Variablen
-    uint32_t bytesToRead = 1, rxPosition = 0, rxLength;
-    int32_t bytesRead = 0;
-    uint8_t ckA = 0, ckB = 0;
-    TickType_t startTick = xTaskGetTickCount();
-    // Lesen
-    while (true) {
-        // 1. Suche nach UBX-Sync-Header
-        // 2. Lese Payload länge
-        // 3. Empfange Payload
-        // 4. Prüfsumme überprüfen
-        if (timeout != portMAX_DELAY) timeout -= xTaskGetTickCount() - startTick;
-        bytesRead = uart_read_bytes(UART_NUM_0, buffer + rxPosition, bytesToRead, timeout);
-        ESP_LOGD("gps", "Bytes %u von %u gelesen nach Position %u:", bytesRead, bytesToRead, rxPosition);
-        ESP_LOG_BUFFER_HEXDUMP("gps", buffer, bytesRead, ESP_LOG_DEBUG);
-        if (bytesRead < 0) return 0; // Empfangsfehler
-        if (bytesRead < bytesToRead) return 0; // innerhalb Timeout zu wenig empfangen
-        // UBX-Protokoll Header prüfen
-        if (buffer[0] != 0xb5) continue;
-        rxPosition += bytesRead;
-        if (rxPosition == 1) { // Sync gefunden, Rest des Headers empfangen
-            bytesToRead = 5;
-            continue;
-        } else if (rxPosition == 2) { // Header komplett, Payload-Länge ermitteln
-            if (buffer[1] != 0x62) return 0; // Fehler
-            bytesToRead = ((uint16_t) buffer[5] << 8) + buffer[4] + 2; // Payload + 2 Byte Checksum
-            continue;
-        }
-        // Checksumme berechnen und prüfen
-        rxLength = rxPosition + bytesRead;
-        for (uint8_t i = 2; i < (rxLength - 2); ++i) {
-            ckA = ckA + buffer[i];
-            ckB = ckB + ckA;
-        }
-        if (ckA != buffer[rxLength - 2] || ckB != buffer[rxLength - 1]) return 0; // Prüfsummenfehler
-        return rxLength;
+    struct gps_input_t input;
+    // Empfangen aus Queue
+    if (xQueueReceive(xGps_input, &input, timeout) == pdFALSE) {
+        return 0;
+    } else {
+        *buffer = input.frame;
+        return input.length;
     }
 }
 
 static bool gps_sendUBX(uint8_t *buffer, uint8_t length, bool aknowledge, TickType_t timeout) {
     TickType_t startTick = xTaskGetTickCount();
     // Zustand prüfen
+    ESP_LOG_BUFFER_HEXDUMP("gps", buffer, length, ESP_LOG_DEBUG);
     if (length > UART_FIFO_LEN) return true; // zu gross für FIFO
     if (xSemaphoreTake(gps.txSemphr, timeout) == pdFALSE) return true; // tx busy, Timeout
     if (UART[GPS_UART]->status.txfifo_cnt) return true; // FIFO nicht leer
+    ets_printf("t");
     // Prüfsumme rechnen
     if (!(buffer[length - 2] || buffer[length - 1])) {
         for (uint8_t i = 2; i < (length - 2); ++i) {
@@ -199,25 +165,32 @@ static bool gps_sendUBX(uint8_t *buffer, uint8_t length, bool aknowledge, TickTy
             buffer[length - 1] = buffer[length - 1] + buffer[length - 2];
         }
     }
+    ets_printf("c");
     // in FIFO schreiben
     for (uint8_t i = 0; i < length; ++i) {
+        //UART[GPS_UART]->fifo.rw_byte = buffer[i];
         WRITE_PERI_REG(UART_FIFO_AHB_REG(GPS_UART), buffer[i]);
     }
+    ets_printf("s");
+    // tx done Interrupt aktivieren
+    UART[GPS_UART]->int_ena.tx_done = 1;
     // AK / NAK
+    ets_printf("a");
     if (!aknowledge) return false; // kein AK erforderlich
-    uint8_t *response = NULL;
+    uint8_t *response;
     timeout -= xTaskGetTickCount() - startTick;
-    if (gps_receiveUBX(response, timeout) < 10); // Timeout oder ungültige Antwort
+    if (gps_receiveUBX(&response, timeout) < 10) return true; // Timeout oder ungültige Antwort
     if (response[3] && response[6] == buffer[2] && response[7] == buffer[3]) return false; // AK ok
     return true;
 }
 
 static void IRAM_ATTR gps_interrupt(void* arg) {
     uart_dev_t *uart = UART[GPS_UART];
+    BaseType_t woken = pdFALSE;
     uint32_t status = uart->int_st.val;
     uart->int_clr.val = UART_INTR_MASK; // alle Interrupts zurücksetzen
     if (status & UART_TX_DONE_INT_ST_M) { // tx beendet, entsperren
-        BaseType_t woken = pdFALSE;
+        uart->int_ena.tx_done = 0; // interrupt deaktivieren
         xSemaphoreGiveFromISR(gps.txSemphr, &woken);
         if (woken == pdTRUE) portYIELD_FROM_ISR();
     } else if (status & UART_RXFIFO_TOUT_INT_ST_M ||
@@ -227,6 +200,7 @@ static void IRAM_ATTR gps_interrupt(void* arg) {
         uint8_t framePos = 0, class = 0x00, id = 0x00, *frame = NULL, ckA = 0, ckB = 0;
         while (uart->status.rxfifo_cnt) {
             uint8_t c = uart->fifo.rw_byte;
+            ets_printf("%s", c);
             switch (framePos) {
                 case (0): { // Sync 1
                     if (c == 0xb5) framePos = 1;
@@ -290,24 +264,19 @@ static void IRAM_ATTR gps_interrupt(void* arg) {
         input.frame = frame;
         input.length = frameSize;
         input.timestamp = esp_timer_get_time();
-        // ToDo
+        xQueueSendToBackFromISR(xGps_input, &input, &woken);
+        if (woken == pdTRUE) portYIELD_FROM_ISR();
     } else if (status & UART_FRM_ERR_INT_ST_M) { // x-Frame Error
         // FIFO zurücksetzen
         while (uart->status.rxfifo_cnt) {
-            READ_PERI_REG(uart->fifo.rw_byte);
+            (volatile void) uart->fifo.rw_byte;
         }
         uart->conf0.rxfifo_rst = 1;
     }
 }
 
 static bool gps_uart_baudrate(uint32_t baud_rate) {
-    int uart_clk_freq;
-    if (UART[GPS_UART]->conf0.tick_ref_always_on == 0) {
-        uart_clk_freq = REF_CLK_FREQ;
-    } else {
-        uart_clk_freq = esp_clk_apb_freq();
-    }
-    uint32_t clk_div = (((uart_clk_freq) << 4) / baud_rate);
+    uint32_t clk_div = ((REF_CLK_FREQ << 4) / baud_rate);
     if (clk_div < 16) return true;
     else {
         UART[GPS_UART]->clk_div.div_int = clk_div >> 4;
@@ -339,7 +308,7 @@ static bool gps_uart_enable(gpio_num_t txPin, gpio_num_t rxPin) {
     uart->int_clr.val = UART_INTR_MASK;
     uart->conf1.rx_tout_thrhd = 100;
     uart->conf1.rx_tout_en = 1;
-    uart->int_ena.val = UART_TX_DONE_INT_ST_M | UART_RXFIFO_TOUT_INT_ENA_M | UART_RXFIFO_OVF_INT_ENA_M | UART_FRM_ERR_INT_ENA_M;
+    uart->int_ena.val = UART_RXFIFO_TOUT_INT_ENA_M | UART_RXFIFO_OVF_INT_ENA_M | UART_FRM_ERR_INT_ENA_M;
 
     return false;
 }
