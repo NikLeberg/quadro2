@@ -83,8 +83,8 @@
 #define BNO_RESET           GPIO_NUM_32
 #define ULTRASONIC_TRIGGER  GPIO_NUM_26
 #define ULTRASONIC_ECHO     GPIO_NUM_27
-#define GPS_RX_HOST_TX      GPIO_NUM_23
-#define GPS_TX_HOST_RX      GPIO_NUM_22
+#define GPS_RX_HOST_TX      GPIO_NUM_17
+#define GPS_TX_HOST_RX      GPIO_NUM_16
 
 
 
@@ -101,9 +101,9 @@ void app_main(void* arg){
                        GPS_TX_HOST_RX, GPS_RX_HOST_TX);
     ESP_LOGI("quadro2", "Status Sensorik: %s", ret ? "Error" : "Ok");
 
-    ESP_LOGI("quadro2", "Starte Remote...");
-    ret = remote_init("OnePlus 5", "Testing1234");
-    ESP_LOGI("quadro2", "Status Remote: %s", ret ? "Error" : "Ok");
+    //ESP_LOGI("quadro2", "Starte Remote...");
+    //ret = remote_init("OnePlus 5", "Testing1234");
+    //ESP_LOGI("quadro2", "Status Remote: %s", ret ? "Error" : "Ok");
 
     ESP_LOGI("quadro2", "Start dauerte: %lld",esp_timer_get_time());
 
