@@ -75,6 +75,7 @@
 #define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 #include "./sensing/sensors.h"
 #include "./remote/remote.h"
+#include "./info/info.h"
 
 // Pins
 #define I2C_SCL             GPIO_NUM_25
@@ -85,6 +86,7 @@
 #define ULTRASONIC_ECHO     GPIO_NUM_27
 #define GPS_RX_HOST_TX      GPIO_NUM_17
 #define GPS_TX_HOST_RX      GPIO_NUM_16
+#define LED_I2C             GPIO_NUM_22
 
 
 
@@ -94,18 +96,22 @@ void app_main(void* arg){
     ESP_LOGI("quadro2", "Version: %s - %s", __DATE__, __TIME__);
 
     bool ret = false;
-    ESP_LOGI("quadro2", "Starte Sensorik...");
-    ret = sensors_init(I2C_SCL, I2C_SDA,
-                       0x4A, BNO_INTERRUPT, BNO_RESET,
-                       ULTRASONIC_TRIGGER, ULTRASONIC_ECHO,
-                       GPS_TX_HOST_RX, GPS_RX_HOST_TX);
-    ESP_LOGI("quadro2", "Status Sensorik: %s", ret ? "Error" : "Ok");
+    // ESP_LOGI("quadro2", "Starte Sensorik...");
+    // ret = sensors_init(I2C_SCL, I2C_SDA,
+    //                    0x4A, BNO_INTERRUPT, BNO_RESET,
+    //                    ULTRASONIC_TRIGGER, ULTRASONIC_ECHO,
+    //                    GPS_TX_HOST_RX, GPS_RX_HOST_TX);
+    // ESP_LOGI("quadro2", "Status Sensorik: %s", ret ? "Error" : "Ok");
 
     //ESP_LOGI("quadro2", "Starte Remote...");
     //ret = remote_init("OnePlus 5", "Testing1234");
     //ESP_LOGI("quadro2", "Status Remote: %s", ret ? "Error" : "Ok");
 
-    ESP_LOGI("quadro2", "Start dauerte: %lld",esp_timer_get_time());
+    ESP_LOGI("quadro2", "Starte Info...");
+    ret = info_init(LED_I2C, 0x00);
+    ESP_LOGI("quadro2", "Status Info: %s", ret ? "Error" : "Ok");
+
+    ESP_LOGI("quadro2", "Start dauerte: %lld", esp_timer_get_time());
 
     // Main Loop
     while (true) {

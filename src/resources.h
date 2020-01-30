@@ -42,3 +42,8 @@ QueueHandle_t xBno_input = NULL;
 TaskHandle_t xRemote_handle = NULL;
 #define xRemote_PRIORITY (6U)
 QueueHandle_t xRemote_input = NULL;
+
+// Info
+TaskHandle_t xInfo_handle = NULL;
+#define xInfo_PRIORITY (1U)
+QueueHandle_t xInfo_input = NULL;
