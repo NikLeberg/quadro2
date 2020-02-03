@@ -10,6 +10,8 @@
  *   - I2S Tx-FIFO hat eine Tiefe von 64 und eine Breite von 32 Bits.
  *   - bei Update wird die interne Abbildung ins WS-Protokoll gewandelt.
  *   - Low: -100-, High: -110- mit per Bit 0,4 us
+ * 
+ *   Lose nach https://github.com/FastLED/FastLED/blob/master/platforms/esp/32/clockless_i2s_esp32.h epfunden.
  */
 
 
@@ -94,6 +96,7 @@ static bool info_ws_update();
 static inline uint32_t info_ws_getColor(uint8_t ledNum, uint8_t color);
 static inline void info_ws_setRGB(uint8_t ledNum, uint8_t red, uint8_t green, uint8_t blue);
 static bool info_ws_init(gpio_num_t dataOut);
+static void IRAM_ATTR info_ws_interrupt(void* arg);
 
 
 /** Implementierung **/
@@ -134,27 +137,68 @@ bool info_init(gpio_num_t dataOut, uint8_t addr) {
 void info_task(void* arg) {
     // Variablen
     struct info_input_t input;
-    uint32_t data = 0b10101010101010101010101010101010;
+    uint32_t data0 = 0b10101110001110001110001110001110;
+    uint32_t data1 = 0b10100001110001110001110001110000;
     // Loop
     while (true) {
         vTaskDelay(1000);
-        //i2s_write(WS_I2S, &data, 1, &written, portMAX_DELAY);
-        info_ws_update();
-        continue;
+        //info_ws_update();
+        //continue;
+        // DEBUG
+        ESP_LOGV("info", "pre");
+        ESP_LOGV("info", "I2S_CONF_REG          %#x", I2S[WS_I2S]->conf.val);
+        ESP_LOGV("info", "I2S_CONF1_REG         %#x", I2S[WS_I2S]->conf1.val);
+        ESP_LOGV("info", "I2S_CONF2_REG         %#x", I2S[WS_I2S]->conf2.val);
+        ESP_LOGV("info", "I2S_TIMING_REG        %#x", I2S[WS_I2S]->timing.val);
+        ESP_LOGV("info", "I2S_FIFO_CONF_REG     %#x", I2S[WS_I2S]->fifo_conf.val);
+        ESP_LOGV("info", "I2S_CONF_SINGLE_DATA_REG %#x", I2S[WS_I2S]->conf_single_data);
+        ESP_LOGV("info", "I2S_CONF_CHAN_REG     %#x", I2S[WS_I2S]->conf_chan.val);
+        ESP_LOGV("info", "I2S_LC_HUNG_CONF_REG  %#x", I2S[WS_I2S]->lc_hung_conf.val);
+        ESP_LOGV("info", "I2S_CLKM_CONF_REG     %#x", I2S[WS_I2S]->clkm_conf.val);
+        ESP_LOGV("info", "I2S_SAMPLE_RATE_CONF_REG %#x", I2S[WS_I2S]->sample_rate_conf.val);
+        ESP_LOGV("info", "I2S_PD_CONF_REG       %#x", I2S[WS_I2S]->pd_conf.val);
+        ESP_LOGV("info", "I2S_CLKM_CONF_REG     %#x", I2S[WS_I2S]->clkm_conf.val);
+        ESP_LOGV("info", "I2S_STATE_REG I2S     %#x", I2S[WS_I2S]->state.val);
+        ESP_LOGV("info", "I2S_LC_CONF_REG I2S   %#x", I2S[WS_I2S]->lc_conf.val);
+        ESP_LOGV("info", "I2S_LC_STATE1_REG     %#x", I2S[WS_I2S]->lc_state1);
+        ESP_LOGV("info", "I2S_PDM_CONF_REG      %#x", I2S[WS_I2S]->pdm_conf.val);
+
+        ESP_LOGV("info", "%u-write %u fifo %u", 0, data0, I2S[WS_I2S]->reserved_0);
+        I2S[WS_I2S]->reserved_0 = data0;
+        ESP_LOGV("info", "%u-write %u fifo %u", 1, data1, I2S[WS_I2S]->reserved_0);
+        I2S[WS_I2S]->reserved_0 = data1;
+        // TX start
+        I2S[WS_I2S]->conf.tx_start = 1;
+        while (!I2S[WS_I2S]->state.tx_idle); // warte auf Ende
+        I2S[WS_I2S]->conf.tx_start = 0;
+
+        // DEBUG
+        ESP_LOGV("info", "apre");
+        ESP_LOGV("info", "I2S_CONF_REG          %#x", I2S[WS_I2S]->conf.val);
+        ESP_LOGV("info", "I2S_CONF1_REG         %#x", I2S[WS_I2S]->conf1.val);
+        ESP_LOGV("info", "I2S_CONF2_REG         %#x", I2S[WS_I2S]->conf2.val);
+        ESP_LOGV("info", "I2S_TIMING_REG        %#x", I2S[WS_I2S]->timing.val);
+        ESP_LOGV("info", "I2S_FIFO_CONF_REG     %#x", I2S[WS_I2S]->fifo_conf.val);
+        ESP_LOGV("info", "I2S_CONF_SINGLE_DATA_REG %#x", I2S[WS_I2S]->conf_single_data);
+        ESP_LOGV("info", "I2S_CONF_CHAN_REG     %#x", I2S[WS_I2S]->conf_chan.val);
+        ESP_LOGV("info", "I2S_LC_HUNG_CONF_REG  %#x", I2S[WS_I2S]->lc_hung_conf.val);
+        ESP_LOGV("info", "I2S_CLKM_CONF_REG     %#x", I2S[WS_I2S]->clkm_conf.val);
+        ESP_LOGV("info", "I2S_SAMPLE_RATE_CONF_REG %#x", I2S[WS_I2S]->sample_rate_conf.val);
+        ESP_LOGV("info", "I2S_PD_CONF_REG       %#x", I2S[WS_I2S]->pd_conf.val);
+        ESP_LOGV("info", "I2S_CLKM_CONF_REG     %#x", I2S[WS_I2S]->clkm_conf.val);
+        ESP_LOGV("info", "I2S_STATE_REG I2S     %#x", I2S[WS_I2S]->state.val);
+        ESP_LOGV("info", "I2S_LC_CONF_REG I2S   %#x", I2S[WS_I2S]->lc_conf.val);
+        ESP_LOGV("info", "I2S_LC_STATE1_REG     %#x", I2S[WS_I2S]->lc_state1);
+        ESP_LOGV("info", "I2S_PDM_CONF_REG      %#x", I2S[WS_I2S]->pdm_conf.val);
+        // Tx start
+        //I2S[WS_I2S]->conf.tx_start = 1;
+        //while (I2S[WS_I2S]->state.tx_idle); // warte auf Start
+        //while (!I2S[WS_I2S]->state.tx_idle); // warte auf Ende
+        //I2S[WS_I2S]->conf.tx_start = 0;
+        //ESP_LOGV("info", "TX done");
+        //I2S[WS_I2S]->conf.tx_start = 0;
         //I2S[WS_I2S]->conf.tx_fifo_reset = 1;
         //I2S[WS_I2S]->conf.tx_fifo_reset = 0;
-        for (uint8_t i = 0; i < 32; ++i) {
-            ESP_LOGV("info", "%u-write %u fifo %u", i, data, I2S[WS_I2S]->reserved_0);
-            I2S[WS_I2S]->reserved_0 = data;
-        }
-        I2S[WS_I2S]->conf.tx_start = 1;
-        while (!I2S[WS_I2S]->state.tx_idle) {
-            ets_delay_us(1000);
-        }
-        ESP_LOGV("info", "tx done");
-        I2S[WS_I2S]->conf.tx_start = 0;
-        I2S[WS_I2S]->conf.tx_fifo_reset = 1;
-        I2S[WS_I2S]->conf.tx_fifo_reset = 0;
         continue;
 
 
@@ -177,27 +221,76 @@ static bool info_ws_init(gpio_num_t dataOut) {
     PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[dataOut], PIN_FUNC_GPIO);
     if (gpio_set_direction(dataOut, GPIO_MODE_OUTPUT)) return true;
     if (gpio_set_pull_mode(dataOut, GPIO_PULLDOWN_ONLY)) return true;
-    // gpio_matrix_out(dataOut, (WS_I2S == I2S_NUM_0) ? I2S0O_DATA_OUT0_IDX : I2S1O_DATA_OUT0_IDX, 0, 0);
     gpio_matrix_out(dataOut, (WS_I2S == I2S_NUM_0) ? I2S0O_DATA_OUT23_IDX : I2S1O_DATA_OUT23_IDX, 0, 0);
-    // Interrupt registrieren
     // Reset
     I2S[WS_I2S]->conf.tx_start = 0;
     I2S[WS_I2S]->conf.tx_reset = 1;
     I2S[WS_I2S]->conf.tx_reset = 0;
     I2S[WS_I2S]->conf.tx_fifo_reset = 1;
     I2S[WS_I2S]->conf.tx_fifo_reset = 0;
-    // Channels, Dualchannel 16 bit aber wir ignorieren WS sowieso
-    I2S[WS_I2S]->fifo_conf.tx_fifo_mod_force_en = 1;
-    I2S[WS_I2S]->fifo_conf.tx_fifo_mod = 2;
-    I2S[WS_I2S]->conf_chan.tx_chan_mod = 0;
-    I2S[WS_I2S]->sample_rate_conf.tx_bits_mod = 32;
+    // Master Mode
+    I2S[WS_I2S]->conf.tx_msb_right = 1;
     I2S[WS_I2S]->conf.tx_mono = 0;
+    I2S[WS_I2S]->conf.tx_short_sync = 0;
+    I2S[WS_I2S]->conf.tx_msb_shift = 0;
+    I2S[WS_I2S]->conf.tx_right_first = 1;
+    I2S[WS_I2S]->conf.tx_slave_mod = 0;
+    // Sample Rate
+    I2S[WS_I2S]->sample_rate_conf.val = 0;
+    I2S[WS_I2S]->sample_rate_conf.tx_bits_mod = 32;
+    I2S[WS_I2S]->sample_rate_conf.tx_bck_div_num = 1;
     // Clock
+    I2S[WS_I2S]->clkm_conf.val = 0;
+    I2S[WS_I2S]->clkm_conf.clka_en = 0; //?
+    // 80 MHz / 64 = 1.25 Mhz = ~ 0.8us Clock. (gilt für Zeit für zwei Bits)
+    I2S[WS_I2S]->clkm_conf.clkm_div_a = 0; //?
+    I2S[WS_I2S]->clkm_conf.clkm_div_b = 1;
+    I2S[WS_I2S]->clkm_conf.clkm_div_num = 64;
+    // 1 / (80 MHz / ?) = 0.8 / 1000 / 1000
     I2S[WS_I2S]->clkm_conf.clk_en = 1;
-    //I2S[WS_I2S]->clkm_conf.clka_en = 1;
-    I2S[WS_I2S]->clkm_conf.clkm_div_num = 32;
-    // DMA deaktivieren
-    I2S[WS_I2S]->fifo_conf.dscr_en = 0;
+    // FIFO (ohne DMA)
+    I2S[WS_I2S]->fifo_conf.val = 0;
+    I2S[WS_I2S]->fifo_conf.tx_fifo_mod_force_en = 1;
+    I2S[WS_I2S]->fifo_conf.tx_fifo_mod = 2; // 32 Bit 2-Kanalig, aber WS interessiert uns nicht
+    I2S[WS_I2S]->fifo_conf.tx_data_num = 32;
+    // Modes
+    I2S[WS_I2S]->conf1.val = 0;
+    I2S[WS_I2S]->conf1.tx_stop_en = 0; //?
+    I2S[WS_I2S]->conf1.tx_pcm_bypass = 1;
+    I2S[WS_I2S]->conf_chan.val = 0;
+    I2S[WS_I2S]->conf_chan.tx_chan_mod = 0; // 2-Kanalig, Links nicht nach Rechts spiegeln
+    // kein Timingcheck
+    I2S[WS_I2S]->timing.val = 0;
+
+    // Master starten
+    //I2S[WS_I2S]->conf.tx_start = 1;
+
+    // Test 1
+    I2S[WS_I2S]->conf2.lcd_en = 0; // Paraleller LCD Modi deaktivieren
+    //I2S[WS_I2S]->conf1.tx_stop_en = 1; // TX = 0 mach FIFO leer, force deak, data_num = 0, master immer an
+
+    
+    // DEBUG
+    ESP_LOGV("info", "I2S_CONF_REG          %#x", I2S[WS_I2S]->conf.val);
+    ESP_LOGV("info", "I2S_CONF1_REG         %#x", I2S[WS_I2S]->conf1.val);
+    ESP_LOGV("info", "I2S_CONF2_REG         %#x", I2S[WS_I2S]->conf2.val);
+    ESP_LOGV("info", "I2S_TIMING_REG        %#x", I2S[WS_I2S]->timing.val);
+    ESP_LOGV("info", "I2S_FIFO_CONF_REG     %#x", I2S[WS_I2S]->fifo_conf.val);
+    ESP_LOGV("info", "I2S_CONF_SINGLE_DATA_REG %#x", I2S[WS_I2S]->conf_single_data);
+    ESP_LOGV("info", "I2S_CONF_CHAN_REG     %#x", I2S[WS_I2S]->conf_chan.val);
+    ESP_LOGV("info", "I2S_LC_HUNG_CONF_REG  %#x", I2S[WS_I2S]->lc_hung_conf.val);
+    ESP_LOGV("info", "I2S_CLKM_CONF_REG     %#x", I2S[WS_I2S]->clkm_conf.val);
+    ESP_LOGV("info", "I2S_SAMPLE_RATE_CONF_REG %#x", I2S[WS_I2S]->sample_rate_conf.val);
+    ESP_LOGV("info", "I2S_PD_CONF_REG       %#x", I2S[WS_I2S]->pd_conf.val);
+    ESP_LOGV("info", "I2S_CLKM_CONF_REG     %#x", I2S[WS_I2S]->clkm_conf.val);
+    ESP_LOGV("info", "I2S_STATE_REG I2S     %#x", I2S[WS_I2S]->state.val);
+    ESP_LOGV("info", "I2S_LC_CONF_REG I2S   %#x", I2S[WS_I2S]->lc_conf.val);
+    ESP_LOGV("info", "I2S_LC_STATE1_REG     %#x", I2S[WS_I2S]->lc_state1);
+    ESP_LOGV("info", "I2S_PDM_CONF_REG      %#x", I2S[WS_I2S]->pdm_conf.val);
+    
+    // Interrupt registrieren
+    //if (esp_intr_alloc(ETS_I2S0_INTR_SOURCE + WS_I2S, ESP_INTR_FLAG_IRAM, info_ws_interrupt, NULL, NULL)) return true;
+    //I2S[WS_I2S]->int_ena.tx_rempty = 1;
 
     return false;
 }
@@ -277,4 +370,11 @@ static bool info_ws_tx(uint32_t color, bool final) {
         buffer = 0;
     }
     return false;
+}
+
+static void IRAM_ATTR info_ws_interrupt(void* arg) {
+    if (I2S[WS_I2S]->int_st.tx_rempty) {
+        I2S[WS_I2S]->conf.tx_start = 0; // TX beenden
+    }
+    I2S[WS_I2S]->int_clr.val = I2S[WS_I2S]->int_st.val; // Interrupts löschen 
 }
