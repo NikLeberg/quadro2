@@ -60,6 +60,7 @@ struct info_ws_led_t {
 
 struct info_t {
     struct info_ws_led_t leds[WS_LED_NUM];
+    SemaphoreHandle_t tx;
 };
 struct info_t info;
 
@@ -107,6 +108,9 @@ bool info_init(gpio_num_t dataOut, uint8_t addr) {
     // Display initialisieren
     // info_display_init();
     // I2S initialisieren
+    info.tx = xSemaphoreCreateMutex();
+    if (!info.tx) return true;
+    xSemaphoreGive(info.tx);
     if (info_ws_init(dataOut)) return true;
     // installiere task
     if (xTaskCreate(&info_task, "info", 3 * 1024, NULL, xInfo_PRIORITY, &xInfo_handle) != pdTRUE) return true;
@@ -119,31 +123,44 @@ void info_task(void* arg) {
     // Variablen
     struct info_input_t input;
     uint8_t i = 0, j = 0;
+    bool fadeUpDone = false;
     // Loop
-    for (uint8_t i = 0; i < WS_LED_NUM; ++i) {
-        info_ws_setRGB(i, 126, 0, 0);
-    }
     while (true) {
-        vTaskDelay(1);
+        //vTaskDelay(1);
+        //xSemaphoreTake(info.tx, portMAX_DELAY);
+        ets_delay_us(1000);
         info_ws_update();
-        for (uint8_t i = 0; i < WS_LED_NUM; ++i) {
-            //info_ws_setRGB(i, (esp_random() % 256) / 2, 0, 0);
-            info_ws_setRGB(i, 0, 0, 0);
+
+        if (!fadeUpDone) {
+            ++(info.leds[i].r);
+            if (info.leds[i].r == 255) fadeUpDone = true;
+        } else {
+            --(info.leds[i].r);
+            if (info.leds[i].r == 0) {
+                fadeUpDone = false;
+                ++i;
+                if (i > WS_LED_NUM - 1) i = 0;
+            }
         }
-        ++j;
-        if (j > WS_LED_NUM - 1) j = 0;
-        info_ws_setRGB(j, 0x1 << 1, 0, 0);
-        info_ws_setRGB((j + 1) % 24, 0x1 << 3, 0, 0);
-        info_ws_setRGB((j + 2) % 24, 0x1 << 5, 0, 0);
-        info_ws_setRGB((j + 3) % 24, 0x1 << 7, 0, 0);
-        info_ws_setRGB(j + 8, 0, 0x1 << 1, 0);
-        info_ws_setRGB((j + 8 + 1) % 24, 0, 0x1 << 3, 0);
-        info_ws_setRGB((j + 8 + 2) % 24, 0, 0x1 << 5, 0);
-        info_ws_setRGB((j + 8 + 3) % 24, 0, 0x1 << 7, 0);
-        info_ws_setRGB(j + 16, 0, 0, 0x1 << 1);
-        info_ws_setRGB((j + 16 + 1) % 24, 0, 0, 0x1 << 3);
-        info_ws_setRGB((j + 16 + 2) % 24, 0, 0, 0x1 << 5);
-        info_ws_setRGB((j + 16 + 3) % 24, 0, 0, 0x1 << 7);
+
+        // for (uint8_t i = 0; i < WS_LED_NUM; ++i) {
+        //     //info_ws_setRGB(i, (esp_random() % 256) / 2, 0, 0);
+        //     info_ws_setRGB(i, 0, 0, 0);
+        // }
+        // ++j;
+        // if (j > WS_LED_NUM - 1) j = 0;
+        // info_ws_setRGB(j, 0x1 << 1, 0, 0);
+        // info_ws_setRGB((j + 1) % 24, 0x1 << 3, 0, 0);
+        // info_ws_setRGB((j + 2) % 24, 0x1 << 5, 0, 0);
+        // info_ws_setRGB((j + 3) % 24, 0x1 << 7, 0, 0);
+        // info_ws_setRGB(j + 8, 0, 0x1 << 1, 0);
+        // info_ws_setRGB((j + 8 + 1) % 24, 0, 0x1 << 3, 0);
+        // info_ws_setRGB((j + 8 + 2) % 24, 0, 0x1 << 5, 0);
+        // info_ws_setRGB((j + 8 + 3) % 24, 0, 0x1 << 7, 0);
+        // info_ws_setRGB(j + 16, 0, 0, 0x1 << 1);
+        // info_ws_setRGB((j + 16 + 1) % 24, 0, 0, 0x1 << 3);
+        // info_ws_setRGB((j + 16 + 2) % 24, 0, 0, 0x1 << 5);
+        // info_ws_setRGB((j + 16 + 3) % 24, 0, 0, 0x1 << 7);
         continue;
 
         continue;
@@ -230,6 +247,7 @@ static inline void info_ws_setRGB(uint8_t ledNum, uint8_t red, uint8_t green, ui
 static bool info_ws_update() {
     // RGB-Farben in I2S-Bitstream wandeln
     uint8_t grbStream[WS_LED_NUM * 3 * 3];
+    uint16_t pos = 0;
     for (uint8_t i = 0; i < WS_LED_NUM; ++i) { // jede LED
         for (uint8_t j = 0; j < 3; ++j) { // jede Farbe
             uint32_t color = 0;
@@ -241,14 +259,13 @@ static bool info_ws_update() {
                     color |= 0b100; // 0 -> 100
                 }
             }
-            grbStream[(i * 9) + (j * 3)] = color >> 16;
-            grbStream[(i * 9) + (j * 3) + 1] = color >> 8;
-            grbStream[(i * 9) + (j * 3) + 2] = color;
+            grbStream[pos++] = color >> 16;
+            grbStream[pos++] = color >> 8;
+            grbStream[pos++] = color;
         }
     }
     // FIFO mit Bitstream füllen
-    uint16_t pos = 0;
-    uint32_t buffer = 0;
+    pos = 0;
     for (; pos < sizeof(grbStream); pos = pos + 4) {
         I2S[WS_I2S]->reserved_0 = grbStream[pos] << 24 | grbStream[pos + 1] << 16 | grbStream[pos + 2] << 8 | grbStream[pos + 3];
     }
@@ -274,12 +291,15 @@ static bool info_ws_update() {
 }
 
 static void IRAM_ATTR info_ws_interrupt(void* arg) {
+    BaseType_t woken;
     if (I2S[WS_I2S]->int_st.tx_rempty) {
         I2S[WS_I2S]->int_ena.tx_rempty = 0; // Interrupt deaktivieren
         //I2S[WS_I2S]->conf.tx_start = 0; // TX beenden
         for (uint32_t i = 0; i < 64; ++i) { // FIFO überschreiben damit nicht nochmal gesendet wird
             I2S[WS_I2S]->reserved_0 = 0;
         }
+        //xSemaphoreGiveFromISR(info.tx, &woken);
     }
-    I2S[WS_I2S]->int_clr.val = I2S[WS_I2S]->int_st.val; // Interrupts zurücksetzen 
+    I2S[WS_I2S]->int_clr.val = I2S[WS_I2S]->int_st.val; // Interrupts zurücksetzen
+    //if (woken == pdTRUE) portYIELD_FROM_ISR();
 }
