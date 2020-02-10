@@ -138,9 +138,10 @@ int ICACHE_FLASH_ATTR cgiWebsockBroadcast(HttpdInstance *pInstance, const char *
 	while (lw!=NULL) {
 		if (strcmp(lw->conn->url, resource)==0) {
 			httpdConnSendStart(pInstance, lw->conn);
-			cgiWebsocketSend(pInstance, lw, data, len, flags);
-			httpdConnSendFinish(pInstance, lw->conn);
-			ret++;
+			if (cgiWebsocketSend(pInstance, lw, data, len, flags) == 1) {
+				httpdConnSendFinish(pInstance, lw->conn);
+				ret++;
+			}
 		}
 		lw=lw->priv->next;
 	}
