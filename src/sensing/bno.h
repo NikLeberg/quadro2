@@ -19,9 +19,9 @@
 
 /** Einstellungen **/
 
-#define BNO_DATA_RATE_IMU_US        100000   // 20 ms
-#define BNO_DATA_RATE_PRESSURE_US   100000  // 100 ms
-#define BNO_STARTUP_WAIT            1000    // 1 s
+#define BNO_DATA_RATE_IMU_US        1000000   // 20 ms
+#define BNO_DATA_RATE_PRESSURE_US   1000000  // 100 ms
+#define BNO_STARTUP_WAIT_MS         1000    // 1 s
 
 
 /*

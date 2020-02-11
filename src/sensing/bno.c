@@ -111,6 +111,16 @@ static void bno_initDone(void *cookie, sh2_AsyncEvent_t *event);
  */
 static bool bno_sensorEnable(sh2_SensorId_t sensorId, uint32_t interval_us);
 
+/*
+ * Function: bno_toWorldFrame
+ * ----------------------------
+ * Rotiere Vektor anhand zuletzt bekannter Orientierung (in Form eines Quaternions)
+ * vom Lokalen Referenzsystem in Weltkoordinaten.
+ *
+ * struct vector_t *vector: zu rotierender Vektor
+ */
+static void bno_toWorldFrame(struct vector_t *vector);
+
 
 /** Implementierung **/
 
@@ -136,15 +146,14 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin) {
     gpioConfig.pull_down_en = GPIO_PULLDOWN_DISABLE;
     gpioConfig.intr_type = GPIO_INTR_NEGEDGE;
     gpio_config(&gpioConfig); // Interruptpin
-    // gpio_install_isr_service(ESP_INTR_FLAG_EDGE | ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LOWMED);
     gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
     if (gpio_isr_handler_add(interruptPin, &bno_interrupt, NULL)) return true;
     // Task starten, pinned da Interrupt an CPU gebunden ist.
-    if (xTaskCreatePinnedToCore(&bno_task, "bno", 3 * 1024, NULL, xSensors_PRIORITY + 1, &xBno_handle, xPortGetCoreID()) != pdTRUE) return true;
+    if (xTaskCreate(&bno_task, "bno", 3 * 1024, NULL, xSensors_PRIORITY + 1, &xBno_handle) != pdTRUE) return true;
     // SensorHub-2 Bibliothek starten
     SemaphoreHandle_t sInitDone = xSemaphoreCreateBinary();
     if (sh2_initialize(&bno_initDone, sInitDone)) return true;
-    if (xSemaphoreTake(sInitDone, BNO_STARTUP_WAIT / portTICK_PERIOD_MS) == pdFALSE) return true; // warte auf Initialisierung
+    if (xSemaphoreTake(sInitDone, BNO_STARTUP_WAIT_MS / portTICK_PERIOD_MS) == pdFALSE) return true; // warte auf Initialisierung
     vSemaphoreDelete(sInitDone);
     // Standartsensoren aktivieren (Intervall so schnell wie möglich)
     if (sh2_setSensorCallback(&bno_sensorEvent, NULL)) return true;
@@ -163,27 +172,24 @@ void bno_task(void* arg) {
         if (xQueueReceive(xBno_input, &input, (BNO_DATA_RATE_IMU_US / 1000 / portTICK_PERIOD_MS) + 1) == pdTRUE) {
             switch (input.type) {
                 case (BNO_INPUT_INTERRUPT): {
-                    do { // Daten empfangen solange es etwas zu empfangen gibt, eliminiert ein Warten um ein FreeRTOS-Tick
-                        // ist sh2-Lib registriert?
-                        if (!bno.onRx) break;
-                        // Datenlänge berechnen, mindestens Header, maximal MAX_TRANSFER
-                        readLength = rxRemaining;
-                        if (readLength < SHTP_HEADER_LEN) readLength = SHTP_HEADER_LEN;
-                        if (readLength > SH2_HAL_MAX_TRANSFER) readLength = SH2_HAL_MAX_TRANSFER;
-                        // Lesen
-                        if (i2c_read(bno.address, bno.rxBuffer, readLength)) break;
-                        // Ermittle Datenlänge des SHTP-Packets
-                        uint16_t cargoLength;
-                        cargoLength = ((bno.rxBuffer[1] << 8) + (bno.rxBuffer[0])) & 0x7fff;
-                        if (!cargoLength) break;
-                        // verbleibende Daten berechnen
-                        if (cargoLength > readLength) {
-                            rxRemaining = (cargoLength - readLength) + SHTP_HEADER_LEN;
-                        } else rxRemaining = 0;
-                        // an sh2-Lib übergeben
-                        bno.onRx(NULL, bno.rxBuffer, readLength, input.timestamp);
-                    } while (rxRemaining);
-                    gpio_intr_enable(bno.interruptPin);
+                    // ist sh2-Lib registriert?
+                    if (!bno.onRx) break;
+                    // Datenlänge berechnen, mindestens Header, maximal MAX_TRANSFER
+                    readLength = rxRemaining;
+                    if (readLength < SHTP_HEADER_LEN) readLength = SHTP_HEADER_LEN;
+                    if (readLength > SH2_HAL_MAX_TRANSFER) readLength = SH2_HAL_MAX_TRANSFER;
+                    // Lesen
+                    if (i2c_read(bno.address, bno.rxBuffer, readLength)) break;
+                    // Ermittle Datenlänge des SHTP-Packets
+                    uint16_t cargoLength;
+                    cargoLength = ((bno.rxBuffer[1] << 8) + (bno.rxBuffer[0])) & 0x7fff;
+                    if (!cargoLength) break;
+                    // verbleibende Daten berechnen
+                    if (cargoLength > readLength) {
+                        rxRemaining = (cargoLength - readLength) + SHTP_HEADER_LEN;
+                    } else rxRemaining = 0;
+                    // an sh2-Lib übergeben
+                    bno.onRx(NULL, bno.rxBuffer, readLength, input.timestamp);
                     break;
                 }
             }
@@ -217,12 +223,12 @@ static void bno_sensorEvent(void * cookie, sh2_SensorEvent_t *event) {
     // Daten verarbeitet an Sensortask weitergeben
     struct sensors_input_t forward;
     switch (value.sensorId) {
-        case (SH2_LINEAR_ACCELERATION):
+        case (SH2_LINEAR_ACCELERATION): // Beschleunigung in globalem Koordinatensystem
             forward.type = SENSORS_ACCELERATION;
-            // toDo: Vektor anhand Orientierung in World-Frame rechnen
             forward.vector.x = value.un.linearAcceleration.x;
             forward.vector.y = value.un.linearAcceleration.y;
             forward.vector.z = value.un.linearAcceleration.z;
+            bno_toWorldFrame(&forward.vector);
             forward.accuracy = value.status & 0b00000011;
             break;
         case (SH2_ROTATION_VECTOR):
@@ -254,7 +260,6 @@ static void IRAM_ATTR bno_interrupt(void* arg) {
         input.type = BNO_INPUT_INTERRUPT;
         input.timestamp = esp_timer_get_time();
         xQueueSendToBackFromISR(xBno_input, &input, &woken);
-        gpio_intr_disable(bno.interruptPin);
         if (woken == pdTRUE) portYIELD_FROM_ISR();
     }
 }
@@ -265,17 +270,35 @@ static void bno_initDone(void *cookie, sh2_AsyncEvent_t *event) {
     }
 }
 
-bool bno_toWorldFrame(struct vector_t *vector) {
-    struct vector_t
-    result = 2.0f * dot(q, v) * q + (q.r * q.r - dot(q, q)) * v + 2.0f * q.r * cross(q, v);
-}
+void bno_toWorldFrame(struct vector_t *vector) {
+    // (q.r * q.r - dot(q, q)) * v + 2.0f * dot(q, v) * q + 2.0f * q.r * cross(q, v);
+    struct vector_t v = *vector;
+    sh2_RotationVectorWAcc_t *q = &bno.lastOrientation;
+    float factor;
 
-inline float bno_matrixDot(struct vector_t *a, struct vector_t *b) {
-    float dot = 0.0f;
-    for (uint8_t i = 0; i < 3; ++i) {
-        dot += a->v[i] * b->v[i];
-    }
-    return dot;
+    factor  = q->real * q->real;
+    factor -= q->i * q->i;
+    factor -= q->j * q->j;
+    factor -= q->k * q->k;
+    v.x *= factor;
+    v.y *= factor;
+    v.z *= factor;
+
+    factor  = vector->x * q->i;
+    factor += vector->y * q->j;
+    factor += vector->z * q->k;
+    factor *= 2.0f;
+    v.x += q->i * factor;
+    v.y += q->j * factor;
+    v.z += q->k * factor;
+
+    factor = q->real * 2.0f;
+    v.x += factor * (q->j * vector->z - q->k * vector->y);
+    v.y += factor * (q->k * vector->x - q->i * vector->z);
+    v.z += factor * (q->i * vector->y - q->j * vector->x);
+
+    *vector = v;
+    return;
 }
 
 /** sh2-hal Implementierung (sh2_hal.h) **/
