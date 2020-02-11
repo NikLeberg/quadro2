@@ -30,25 +30,32 @@ enum sensors_input_type_t {
     SENSORS_GROUNDSPEED // m/s
 };
 
-struct sensor_input_gps_t {
-    int16_t speed, heading;
+struct vector_t { // generischer Vektor
+    union {
+        struct {
+            float x, y, z;
+        };
+        float v[3];
+    };
+};
+
+struct orientation_t { // Orientierung
+    float i, j, k;
+    float real;
+};
+
+struct position_t { // Position
+    float latitude, longitude, altitude;
 };
 
 struct sensors_input_t {
     enum sensors_input_type_t type;
     int64_t timestamp;
     union {
-        struct { // generischer Vektor
-            float x, y, z;
-        } vector;
-        struct { // Orientierung
-            float i, j, k;
-            float real;
-        } orientation;
+        struct vector_t vector;
+        struct orientation_t orientation;
         float distance; // generische Distanz
-        struct { // Position
-            float latitude, longitude, altitude;
-        } position;
+        struct position_t position;
     };
     float accuracy; // Genauigkeit der Daten
 };

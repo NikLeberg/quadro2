@@ -265,6 +265,19 @@ static void bno_initDone(void *cookie, sh2_AsyncEvent_t *event) {
     }
 }
 
+bool bno_toWorldFrame(struct vector_t *vector) {
+    struct vector_t
+    result = 2.0f * dot(q, v) * q + (q.r * q.r - dot(q, q)) * v + 2.0f * q.r * cross(q, v);
+}
+
+inline float bno_matrixDot(struct vector_t *a, struct vector_t *b) {
+    float dot = 0.0f;
+    for (uint8_t i = 0; i < 3; ++i) {
+        dot += a->v[i] * b->v[i];
+    }
+    return dot;
+}
+
 /** sh2-hal Implementierung (sh2_hal.h) **/
 int sh2_hal_reset(bool dfuMode, sh2_rxCallback_t *onRx, void *cookie) {
     // DFU-Modus nicht unterstützt
