@@ -165,9 +165,9 @@ bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
     // UBX-CFG-RATE: Daten-Rate setzen
     uint8_t msgRate[] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, (0xff & GPS_DATA_RATE), (GPS_DATA_RATE >> 8), 0x01, 0x00, 0x00, 0x00, NULL, NULL};
     if (gps_sendUBX(msgRate, sizeof(msgRate), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
-
-    // Task starten
-    if (xTaskCreate(&gps_task, "gps", 3 * 1024, NULL, xSensors_PRIORITY + 1, &xGps_handle) != pdTRUE) return true;
+    // Task starten, pinned da UART Interrupt an CPU gebunden ist.
+    if (xTaskCreatePinnedToCore(&gps_task, "gps", 3 * 1024, NULL, xSensors_PRIORITY + 1, &xGps_handle, xPortGetCoreID()) != pdTRUE) return true;
+    
     return false;
 }
 
