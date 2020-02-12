@@ -96,6 +96,13 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     return ret;
 }
 
+void sensors_setHome() {
+    // bno hat kein Home, vielleicht aber Kalibrieren?
+    ult_setHome();
+    gps_setHome();
+    return;
+}
+
 /* Haupttask */
 
 void sensors_task(void* arg) {
@@ -104,6 +111,7 @@ void sensors_task(void* arg) {
     // Loop
     while (true) {
         if (xQueueReceive(xSensors_input, &input, 5000 / portTICK_PERIOD_MS) == pdTRUE) {
+            ESP_LOGI("sensors", "waiting: %u", uxQueueMessagesWaiting(xSensors_input));
             switch (input.type) {
                 case (SENSORS_ACCELERATION): {
                     ESP_LOGI("sensors", "%llu,A,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z);

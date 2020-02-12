@@ -21,6 +21,7 @@
 #include "ultrasonic.h"
 #include "resources.h"
 #include "sensor_types.h"
+#include "bno.h"
 
 
 /** Variablendeklaration **/
@@ -38,6 +39,8 @@ struct ult_input_t {
 
 struct ult_t {
     gpio_num_t triggerPin, echoPin;
+    bool setHome;
+    float home;
 };
 static struct ult_t ult;
 
@@ -102,6 +105,11 @@ bool ult_init(gpio_num_t triggerPin, gpio_num_t echoPin) {
     return false;
 }
 
+void ult_setHome() {
+    ult.setHome = true;
+    return;
+}
+
 void ult_task(void* arg) {
     // Variablen
     struct ult_input_t input;
@@ -131,6 +139,19 @@ void ult_task(void* arg) {
             ++noGroundSince;
             continue;
         } else noGroundSince = 0;
+        // Korrigieren gemäss aktueller Orientierung
+        struct vector_t vector = { .x = 0, .y = 0, .z = -distance};
+        bno_toWorldFrame(&vector);
+        distance = -vector.z;
+        // Homepunkt anwenden
+        if (ult.setHome) {
+            ult.home = distance;
+            distance = 0.0f;
+            ult.setHome = false;
+        } else {
+            distance -= ult.home;
+            if (distance < 0) distance = 0.0f;
+        }
         // Abstand weiterleiten an Sensortask
         struct sensors_input_t forward;
         forward.type = SENSORS_ULTRASONIC;

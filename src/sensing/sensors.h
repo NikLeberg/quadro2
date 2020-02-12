@@ -61,3 +61,10 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,
                   uint8_t bnoAddr, gpio_num_t bnoInterrupt, gpio_num_t bnoReset,
                   gpio_num_t ultTrigger, gpio_num_t ultEcho,
                   gpio_num_t gpsRxPin, gpio_num_t gpsTxPin);
+
+/*
+ * Function: sensors_setHome
+ * ----------------------------
+ * Setze aktuelle Position als Homepunkt aller Sensoren.
+ */
+void sensors_setHome();

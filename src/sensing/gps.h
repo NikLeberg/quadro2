@@ -34,3 +34,11 @@
  * returns: false -> Erfolg, true -> Error
  */
 bool gps_init(gpio_num_t rxPin, gpio_num_t txPin);
+
+/*
+ * Function: gps_setHome
+ * ----------------------------
+ * Setze aktuelle Position als Homepunkt.
+ * Wird erst beim nächsten guten Fix angewendet!
+ */
+void gps_setHome();
