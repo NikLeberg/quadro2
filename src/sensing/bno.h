@@ -15,12 +15,13 @@
 
 #include "esp_system.h"
 #include "driver/gpio.h"
+#include "sensor_types.h"
 
 
 /** Einstellungen **/
 
-#define BNO_DATA_RATE_IMU_US        1000000   // 20 ms
-#define BNO_DATA_RATE_PRESSURE_US   1000000  // 100 ms
+#define BNO_DATA_RATE_IMU_US        20000   // 20 ms
+#define BNO_DATA_RATE_PRESSURE_US   100000  // 100 ms
 #define BNO_STARTUP_WAIT_MS         1000    // 1 s
 
 
@@ -36,3 +37,13 @@
  * returns: false -> Erfolg, true -> Error
  */
 bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin);
+
+/*
+ * Function: bno_toWorldFrame
+ * ----------------------------
+ * Rotiere Vektor anhand zuletzt bekannter Orientierung (in Form eines Quaternions)
+ * vom Lokalen Referenzsystem in Weltkoordinaten.
+ *
+ * struct vector_t *vector: zu rotierender Vektor
+ */
+void bno_toWorldFrame(struct vector_t *vector);

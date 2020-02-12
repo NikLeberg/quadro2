@@ -19,6 +19,7 @@
 #include "sh2_hal.h"
 #include "sh2_SensorValue.h"
 #include "sh2_err.h"
+#include "esp_log.h"
 
 
 /** Interne Abhängigkeiten **/
@@ -52,6 +53,7 @@ struct bno_t {
     sh2_rxCallback_t *onRx;
     uint8_t rxBuffer[SH2_HAL_MAX_TRANSFER];
 
+    portMUX_TYPE spinLock;
     sh2_RotationVectorWAcc_t lastOrientation;
 };
 static struct bno_t bno;
@@ -111,16 +113,6 @@ static void bno_initDone(void *cookie, sh2_AsyncEvent_t *event);
  */
 static bool bno_sensorEnable(sh2_SensorId_t sensorId, uint32_t interval_us);
 
-/*
- * Function: bno_toWorldFrame
- * ----------------------------
- * Rotiere Vektor anhand zuletzt bekannter Orientierung (in Form eines Quaternions)
- * vom Lokalen Referenzsystem in Weltkoordinaten.
- *
- * struct vector_t *vector: zu rotierender Vektor
- */
-static void bno_toWorldFrame(struct vector_t *vector);
-
 
 /** Implementierung **/
 
@@ -129,8 +121,10 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin) {
     bno.address = address;
     bno.interruptPin = interruptPin;
     bno.resetPin = resetPin;
-    // Input Queue erstellen
+    // Input Queue & Spinlock erstellen
     xBno_input = xQueueCreate(4, sizeof(struct bno_input_t));
+    bno.spinLock.owner = portMUX_FREE_VAL;
+    bno.spinLock.count = 0;
     // konfiguriere Pins und aktiviere Interrupts
     gpio_config_t gpioConfig;
     gpioConfig.pin_bit_mask = ((1ULL) << resetPin);
@@ -167,9 +161,11 @@ void bno_task(void* arg) {
     // Variablen
     struct bno_input_t input;
     uint16_t readLength, rxRemaining = 0;
+    uint8_t timeoutCount = 0;
     // Loop
     while (true) {
         if (xQueueReceive(xBno_input, &input, (BNO_DATA_RATE_IMU_US / 1000 / portTICK_PERIOD_MS) + 1) == pdTRUE) {
+            timeoutCount = 0;
             switch (input.type) {
                 case (BNO_INPUT_INTERRUPT): {
                     // ist sh2-Lib registriert?
@@ -194,7 +190,7 @@ void bno_task(void* arg) {
                 }
             }
         } else { // vermutlich ein Interrupt verpasst, prüfe
-            if (gpio_get_level(bno.interruptPin) == 0) {
+            if (gpio_get_level(bno.interruptPin) == 0 || ++timeoutCount > 10) {
                 struct bno_input_t input;
                 input.type = BNO_INPUT_INTERRUPT;
                 input.timestamp = esp_timer_get_time();
@@ -202,6 +198,39 @@ void bno_task(void* arg) {
             }
         }
     }
+}
+
+void bno_toWorldFrame(struct vector_t *vector) {
+    // (q.r * q.r - dot(q, q)) * v + 2.0f * dot(q, v) * q + 2.0f * q.r * cross(q, v);
+    struct vector_t v = *vector;
+    portENTER_CRITICAL(&bno.spinLock);
+    sh2_RotationVectorWAcc_t q = bno.lastOrientation;
+    portEXIT_CRITICAL(&bno.spinLock);
+    float factor;
+
+    factor  = q.real * q.real;
+    factor -= q.i * q.i;
+    factor -= q.j * q.j;
+    factor -= q.k * q.k;
+    v.x *= factor;
+    v.y *= factor;
+    v.z *= factor;
+
+    factor  = vector->x * q.i;
+    factor += vector->y * q.j;
+    factor += vector->z * q.k;
+    factor *= 2.0f;
+    v.x += q.i * factor;
+    v.y += q.j * factor;
+    v.z += q.k * factor;
+
+    factor = q.real * 2.0f;
+    v.x += factor * (q.j * vector->z - q.k * vector->y);
+    v.y += factor * (q.k * vector->x - q.i * vector->z);
+    v.z += factor * (q.i * vector->y - q.j * vector->x);
+
+    *vector = v;
+    return;
 }
 
 static bool bno_sensorEnable(sh2_SensorId_t sensorId, uint32_t interval_us) {
@@ -232,7 +261,9 @@ static void bno_sensorEvent(void * cookie, sh2_SensorEvent_t *event) {
             forward.accuracy = value.status & 0b00000011;
             break;
         case (SH2_ROTATION_VECTOR):
+            portENTER_CRITICAL(&bno.spinLock);
             bno.lastOrientation = value.un.rotationVector; // interne Kopie
+            portEXIT_CRITICAL(&bno.spinLock);
             forward.type = SENSORS_ORIENTATION;
             forward.orientation.i = value.un.rotationVector.i;
             forward.orientation.j = value.un.rotationVector.j;
@@ -268,37 +299,6 @@ static void bno_initDone(void *cookie, sh2_AsyncEvent_t *event) {
     if (event->eventId == SH2_RESET && cookie != NULL) {
         xSemaphoreGive((SemaphoreHandle_t) cookie);
     }
-}
-
-void bno_toWorldFrame(struct vector_t *vector) {
-    // (q.r * q.r - dot(q, q)) * v + 2.0f * dot(q, v) * q + 2.0f * q.r * cross(q, v);
-    struct vector_t v = *vector;
-    sh2_RotationVectorWAcc_t *q = &bno.lastOrientation;
-    float factor;
-
-    factor  = q->real * q->real;
-    factor -= q->i * q->i;
-    factor -= q->j * q->j;
-    factor -= q->k * q->k;
-    v.x *= factor;
-    v.y *= factor;
-    v.z *= factor;
-
-    factor  = vector->x * q->i;
-    factor += vector->y * q->j;
-    factor += vector->z * q->k;
-    factor *= 2.0f;
-    v.x += q->i * factor;
-    v.y += q->j * factor;
-    v.z += q->k * factor;
-
-    factor = q->real * 2.0f;
-    v.x += factor * (q->j * vector->z - q->k * vector->y);
-    v.y += factor * (q->k * vector->x - q->i * vector->z);
-    v.z += factor * (q->i * vector->y - q->j * vector->x);
-
-    *vector = v;
-    return;
 }
 
 /** sh2-hal Implementierung (sh2_hal.h) **/
