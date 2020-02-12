@@ -38,13 +38,29 @@ function processMessage(event) {
 }
 
 function displayConnectivity() {
+    if (displayConnectivity.locked == "undefined") {
+        displayConnectivity.locked = false;
+    }
+    if (displayConnectivity.locked) return;
+    displayConnectivity.locked = true;
+    setTimeout(function(){
+        displayConnectivity.locked = false;
+    }, 100);
     let e = document.getElementById("ws");
     let spinner = {
-        '?' : '◜',
-        '◜' : '◝',
-        '◝' : '◞',
-        '◞' : '◟',
-        '◟' : '◜',
+        '----------' : '+---------',
+        '+---------' : '#+--------',
+        '#+--------' : '+#+-------',
+        '+#+-------' : '-+#+------',
+        '-+#+------' : '--+#+-----',
+        '--+#+-----' : '---+#+----',
+        '---+#+----' : '----+#+---',
+        '----+#+---' : '-----+#+--',
+        '-----+#+--' : '------+#+-',
+        '------+#+-' : '-------+#+',
+        '-------+#+' : '--------+#',
+        '--------+#' : '---------+',
+        '---------+' : '----------'
     };
     e.innerHTML = spinner[e.innerHTML];
 }
@@ -58,6 +74,8 @@ function processControl(message) {
 }
 
 function writeLog(message) {
+    let filter = document.getElementsByName("logFilter")[0].value;
+    if (!message.includes(filter)) return;
     let log = document.getElementById("log");
     let level = message.charAt(0);
     let line = document.createElement("pre");
@@ -70,9 +88,16 @@ function writeLog(message) {
         'V' : "gray"
     };
     line.style.color = colors[level];
-    log.appendChild(line);
+    log.prepend(line);
 }
 
 function displaySensors(message) {
     ;
+}
+
+function clearLog() {
+    let log = document.getElementById("log");
+    while (log.firstChild) {
+        log.removeChild(log.firstChild);
+    }
 }

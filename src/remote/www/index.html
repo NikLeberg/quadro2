@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
     <meta name="mobile-web-app-capable" content="yes" />
     <link rel="manifest" href="manifest.json" />
@@ -9,8 +10,10 @@
 <body>
 
     <h1>quadro2</h1>
-    <p id=ws>?</p>
+    <p id=ws style="font-family: monospace;">----------</p>
     <p>Log</p>
+    <input type="text" name="logFilter" placeholder="Filter für neue Logeinträge">
+    <input type="button" value="Log leeren" onclick="clearLog()">
     <div id=log></div>
 
 </body>
