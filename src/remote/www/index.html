@@ -11,10 +11,19 @@
 
     <h1>quadro2</h1>
     <p id=ws style="font-family: monospace;">----------</p>
-    <p>Log</p>
-    <input type="text" name="logFilter" placeholder="Filter für neue Logeinträge">
-    <input type="button" value="Log leeren" onclick="clearLog()">
-    <div id=log></div>
+    <div id="logDiv">
+        <p>Log</p>
+        <input type="text" name="logFilter" placeholder="Filter für neue Logeinträge">
+        <input type="button" value="Log leeren" onclick="clearLog()">
+        <span onchange="changeLog()">
+            <input type="checkbox" name="E" checked>Error
+            <input type="checkbox" name="W" checked>Warning
+            <input type="checkbox" name="I" checked>Info
+            <input type="checkbox" name="D" checked>Debug
+            <input type="checkbox" name="V" checked>Verbose
+        </span>
+        <div id=log></div>
+    </div>
 
 </body>
 </html>

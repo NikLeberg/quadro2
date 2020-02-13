@@ -101,3 +101,17 @@ function clearLog() {
         log.removeChild(log.firstChild);
     }
 }
+
+function changeLog() {
+    let log = document.getElementById("logDiv");
+    let str = "l";
+    // Change senden
+    for (let box of log.querySelectorAll("input[type=checkbox")) {
+        str += box.checked ? "" : box.name;
+    }
+    ws.send(str);
+    // Einträge verstecken
+    for (let entry of log.querySelectorAll("pre")) {
+        entry.style.display = str.includes(entry.innerHTML[0]) ? "none" : "inherit";
+    }
+}

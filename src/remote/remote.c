@@ -24,7 +24,7 @@
 #include "esp_log.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
-#define CONFIG_ESPHTTPD_BACKLOG_SUPPORT 1
+// #define CONFIG_ESPHTTPD_BACKLOG_SUPPORT 1
 #include "esp.h" //libesphttpd
 #include "httpd.h"
 #include "httpd-freertos.h"
@@ -82,6 +82,7 @@ struct remote_t {
     uint8_t connected;
 
     vprintf_like_t defaultLog;
+    char disabledLogs[5];
 
     struct remote_setting_linked_list_t *settingsHead;
 };
@@ -317,8 +318,8 @@ void remote_task(void* arg) {
         now = esp_timer_get_time();
         if (remote.connected && (now - lastContact > 500000)) {
             if (timeoutPending) { // Timeout fällig -> echter Timeout! -> Notstopp
-                ; // ToDo Event propagieren
-                printf("remote timeout\n");
+                // ToDo Event propagieren
+                ESP_LOGE("remote", "timeout!");
                 timeoutPending = false;
             } else {
                 cgiWebsockBroadcast(&remote.httpd.httpdInstance, "/ws", "s?", 2, WEBSOCK_FLAG_NONE);
@@ -382,21 +383,25 @@ bool remote_settingSet(settingHandle_t handle, uint32_t value) {
 }
 
 static esp_err_t remote_connectionEventHandler(void *ctx, system_event_t *event) {
-    printf("\nEvent: %d\n", event->event_id);
+    ESP_LOGD("remote", "WiFi Event: %d", event->event_id);
     switch(event->event_id) {
         case SYSTEM_EVENT_STA_START:
-            //printf("WLAN start\n");
             esp_wifi_connect();
             break;
-        case SYSTEM_EVENT_STA_GOT_IP:
-            //printf("WLAN got ip\n");
+        case SYSTEM_EVENT_STA_GOT_IP: {
+            uint32_t ip = event->event_info.got_ip.ip_info.ip.addr;
+            ESP_LOGD("remote", "IP - %u.%u.%u.%u", ip & 0xff, (ip >> 8) & 0xff, (ip >> 16) & 0xff, (ip >> 24));
             break;
+        }
         case SYSTEM_EVENT_STA_DISCONNECTED:
             // Verbindung wiederherstellen, wenn nicht absichtlich
             if (event->event_info.disconnected.reason != WIFI_REASON_ASSOC_LEAVE
             && event->event_info.disconnected.reason != WIFI_REASON_AUTH_FAIL) {
-                esp_wifi_connect();
+                esp_wifi_stop();
             }
+            break;
+        case SYSTEM_EVENT_STA_STOP:
+            esp_wifi_start();
             break;
         default:
             break;
@@ -409,7 +414,6 @@ static bool remote_initWlan(char* ssid, char* pw) {
     wifi_config_t wifi_config = {0};
     strcpy((char*)wifi_config.sta.ssid, ssid);
     strcpy((char*)wifi_config.sta.password, pw);
-    printf("\nssid: %s %s\n", wifi_config.sta.ssid, wifi_config.sta.password);
     tcpip_adapter_init();
     if (esp_event_loop_init(remote_connectionEventHandler, NULL)
     || esp_wifi_init(&cfg)
@@ -429,6 +433,10 @@ static void remote_processMessage(struct remote_input_message_t *message) {
             break;
         case 'c': // Control
             // ToDo -> Weiterleiten an control
+            break;
+        case 'l': // Log
+            memset(remote.disabledLogs, 0, sizeof(remote.disabledLogs) - 1);
+            memcpy(remote.disabledLogs, (message->data + 1), message->length);
             break;
         case 'r': // Report, wird vom Handy nicht verschickt
         default:
@@ -463,8 +471,8 @@ static void remote_wsConnect(Websock *ws) {
     input.type = REMOTE_INPUT_CONNECTED;
     xQueueSend(xRemote_input, &input, 0);
     // Callbacks registrieren
-	ws->recvCb=remote_wsReceive;
-    ws->closeCb=remote_wsDisconnect;
+	ws->recvCb = remote_wsReceive;
+    ws->closeCb = remote_wsDisconnect;
     // Hallo senden
 	cgiWebsocketSend(&remote.httpd.httpdInstance, ws, "quadro2", 7, WEBSOCK_FLAG_NONE);
 }
@@ -552,6 +560,11 @@ CgiStatus remote_sendEmbedded(HttpdConnData *connData) {
 }
 
 int remote_printLog(const char * format, va_list arguments) {
+    for (uint8_t i = 0; i < sizeof(remote.disabledLogs); ++i) {
+        if (format[0] == remote.disabledLogs[i]) {
+            return remote.defaultLog(format, arguments);
+        }
+    }
     char *string = (char*) malloc(128 * sizeof(char));
     int length = 0;
     string[0] = 'l';
