@@ -111,7 +111,6 @@ void sensors_task(void* arg) {
     // Loop
     while (true) {
         if (xQueueReceive(xSensors_input, &input, 5000 / portTICK_PERIOD_MS) == pdTRUE) {
-            ESP_LOGI("sensors", "waiting: %u", uxQueueMessagesWaiting(xSensors_input));
             switch (input.type) {
                 case (SENSORS_ACCELERATION): {
                     ESP_LOGI("sensors", "%llu,A,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z);
@@ -137,6 +136,11 @@ void sensors_task(void* arg) {
                     ESP_LOGI("sensors", "%llu,S,%f,%f", input.timestamp, input.vector.x, input.vector.y);
                     break;
                 }
+            }
+            // lösche wenn Platz gering wird
+            if (uxQueueSpacesAvailable(xSensors_input) <= 1) {
+                xQueueReset(xSensors_input);
+                ESP_LOGE("sensors", "queue reset!");
             }
         } else {
             ESP_LOGD("sensors", "%llu,online", esp_timer_get_time());
