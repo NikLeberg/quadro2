@@ -143,6 +143,7 @@ void ult_task(void* arg) {
         struct vector_t vector = { .x = 0, .y = 0, .z = -distance};
         bno_toWorldFrame(&vector);
         distance = -vector.z;
+        if (distance < 0.0f) continue; // durch Rechnung ungültig geworden
         // Homepunkt anwenden
         if (ult.setHome) {
             ult.home = distance;
