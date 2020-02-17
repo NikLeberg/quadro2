@@ -20,6 +20,7 @@
 #include "sh2_SensorValue.h"
 #include "sh2_err.h"
 #include "esp_log.h"
+#include "driver/gpio.h"
 
 
 /** Interne Abhängigkeiten **/
@@ -287,7 +288,13 @@ static void bno_sensorEvent(void * cookie, sh2_SensorEvent_t *event) {
 static void IRAM_ATTR bno_interrupt(void* arg) {
     BaseType_t woken;
     struct bno_input_t input;
-    if (gpio_get_level(bno.interruptPin) == 0) {
+    bool level;
+    if (bno.interruptPin < 32) { // gpio_get_level ist nicht im IRAM
+        level = (GPIO.in >> bno.interruptPin) & 0x1;
+    } else {
+        level = (GPIO.in1.data >> (bno.interruptPin - 32)) & 0x1;
+    }
+    if (!level) {
         input.type = BNO_INPUT_INTERRUPT;
         input.timestamp = esp_timer_get_time();
         xQueueSendToBackFromISR(xBno_input, &input, &woken);

@@ -90,7 +90,6 @@ bool ult_init(gpio_num_t triggerPin, gpio_num_t echoPin) {
     gpioConfig.pull_down_en = GPIO_PULLDOWN_DISABLE;
     gpioConfig.intr_type = GPIO_INTR_ANYEDGE;
     gpio_config(&gpioConfig); // Echo Pin
-    // gpio_install_isr_service(ESP_INTR_FLAG_EDGE | ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LOWMED);
     gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
     if (gpio_isr_handler_add(echoPin, &ult_interrupt, NULL)) return true;
     // Sende Trigger und warte auf Antwort
@@ -165,7 +164,11 @@ void ult_task(void* arg) {
 static void IRAM_ATTR ult_interrupt(void* arg) {
     BaseType_t woken;
     struct ult_input_t input;
-    input.level = gpio_get_level(ult.echoPin);
+    if (ult.echoPin < 32) { // gpio_get_level ist nicht im IRAM
+        input.level = (GPIO.in >> ult.echoPin) & 0x1;
+    } else {
+        input.level = (GPIO.in1.data >> (ult.echoPin - 32)) & 0x1;
+    }
     input.timestamp = esp_timer_get_time();
     xQueueSendToBackFromISR(xUlt_input, &input, &woken);
     if (woken == pdTRUE) portYIELD_FROM_ISR();
