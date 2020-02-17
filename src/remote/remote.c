@@ -31,10 +31,8 @@
 #include "httpd-freertos.c"
 #include "cgiwebsocket.h"
 #include "route.h"
-#if (REMOTE_SETTINGS_USE_NVS == 1)
-    #include "nvs.h"
-    #include "nvs_flash.h"
-#endif
+#include "nvs.h"
+#include "nvs_flash.h"
 
 
 /** Interne Abhängigkeiten **/
@@ -77,9 +75,10 @@ struct remote_setting_linked_list_t {
 
 struct remote_t {
     HttpdFreertosInstance httpd;
-    char httpdConn[sizeof(RtosConnType) * 3]; // maximal 3 Verbindungen
+    char httpdConn[sizeof(RtosConnType) * REMOTE_CONNECTION_COUNT];
 
     uint8_t connected;
+    Websock *ws;
 
     vprintf_like_t defaultLog;
     char disabledLogs[5];
@@ -225,6 +224,23 @@ static CgiStatus remote_sendEmbedded(HttpdConnData *connData);
  */
 int remote_printLog(const char *format, va_list arguments);
 
+/*
+ * Function: remote_settingSet
+ * ----------------------------
+ * Verändert eine Einstellung und aktualisiert NVS.
+ * Callback kann Änderung mit true ablehnen.
+ * 
+ * struct remote_setting_linked_list_t *currentSetting: Einstellung aus linked List
+ * char *value: neuer Wert in Textform
+ *
+ * returns: false -> Erfolg, true -> Error / Abgelehnt
+ */
+static bool remote_settingSet(struct remote_setting_linked_list_t *currentSetting, char *value);
+
+//
+static void remote_processSetting(struct remote_input_message_t *message);
+struct remote_setting_linked_list_t* remote_settingSelect(char *taskTag, char *settingTag);
+
 
 /** Files **/
 
@@ -267,7 +283,7 @@ bool remote_init(char* ssid, char* pw) {
     // Task starten
     if (xTaskCreate(&remote_task, "remote", 3 * 1024, NULL, xRemote_PRIORITY, &xRemote_handle) != pdTRUE) return true;
     // libesphttpd Bibliothek starten
-	if (httpdFreertosInit(&remote.httpd, builtInUrls, 80U, remote.httpdConn, 3U, HTTPD_FLAG_NONE)) return true;
+	if (httpdFreertosInit(&remote.httpd, builtInUrls, 80U, remote.httpdConn, REMOTE_CONNECTION_COUNT, HTTPD_FLAG_NONE)) return true;
 	if (httpdFreertosStart(&remote.httpd)) return true;
     esp_log_level_set("cgiwebsocket", ESP_LOG_INFO);
     esp_log_level_set("httpd-freertos", ESP_LOG_INFO);
@@ -321,8 +337,8 @@ void remote_task(void* arg) {
                 // ToDo Event propagieren
                 ESP_LOGE("remote", "timeout!");
                 timeoutPending = false;
-            } else {
-                cgiWebsockBroadcast(&remote.httpd.httpdInstance, "/ws", "s?", 2, WEBSOCK_FLAG_NONE);
+            } else if (remote.ws) {
+                cgiWebsocketSend(&remote.httpd.httpdInstance, remote.ws,"s?", 2, WEBSOCK_FLAG_NONE);
                 timeoutPending = true;
                 lastContact = now;
             }
@@ -330,12 +346,12 @@ void remote_task(void* arg) {
     }
 }
 
-settingHandle_t remote_settingRegister(const char *taskTag, const char *settingTag, remote_settingUpdate_t *updateCallback, void *updateCallbackCookie, struct setting_t *setting) {
+bool remote_settingRegister(const char *taskTag, const char *settingTag, remote_settingUpdate_t *updateCallback, void *updateCallbackCookie, struct setting_t *setting) {
     // Liste nach Ende suchen
     struct remote_setting_linked_list_t *currentSetting = remote.settingsHead;
     while (currentSetting->next) { // Ende suchen, prüfe ob bereits registriert
-        if (!strcmp(taskTag, currentSetting->taskTag) || !strcmp(settingTag, currentSetting->settingTag)) {
-            return (settingHandle_t) currentSetting;
+        if (!strcmp(taskTag, currentSetting->taskTag) && !strcmp(settingTag, currentSetting->settingTag)) {
+            return true;
         }
         currentSetting = currentSetting->next;
     }
@@ -347,39 +363,26 @@ settingHandle_t remote_settingRegister(const char *taskTag, const char *settingT
     currentSetting->settingTag = malloc(strlen(settingTag) + 1);
     strcpy(currentSetting->settingTag, settingTag);
     currentSetting->updateCallback = updateCallback;
+    currentSetting->updateCallbackCookie = updateCallbackCookie;
     currentSetting->next = calloc(1, sizeof(struct remote_setting_linked_list_t)); // neues Listenelement bereithalten
     // NVS durchsuchen
     #if (REMOTE_SETTINGS_USE_NVS == 1)
         nvs_handle nvsHandle;
-        if (nvs_open(taskTag, NVS_READWRITE, &nvsHandle)) return NULL;
-        if (nvs_get_u32(nvsHandle, settingTag, &setting->value.ui) == ESP_ERR_NVS_NOT_FOUND) {
-            // Key noch nicht vorhanden -> erstellen
-            if (nvs_set_u32(nvsHandle, settingTag, setting->value.ui)) return NULL; // Fehler beim speichern
+        if (nvs_open(taskTag, NVS_READWRITE, &nvsHandle)) return true;
+        esp_err_t ret = nvs_get_u32(nvsHandle, settingTag, &setting->value.ui);
+        if (ret == ESP_ERR_NVS_NOT_FOUND) { // Key noch nicht vorhanden -> erstellen
+            if (nvs_set_u32(nvsHandle, settingTag, setting->value.ui)) return true; // Fehler beim speichern
             // Keine Veränderung vorgenommen, Beende Erfolgreich
+            if (nvs_commit(nvsHandle)) return true;
             nvs_close(nvsHandle);
-            return (settingHandle_t) currentSetting;
-        }
+            return false;
+        } else if (ret) return true;
         // Einstellung registriert und mit NVS Wert aktualisiert -> mitteilen
         currentSetting->updateCallback(updateCallbackCookie, currentSetting->setting);
-        if (nvs_commit(nvsHandle)) return NULL;
-        nvs_close(nvsHandle);
-    #endif
-    return (settingHandle_t) currentSetting; // Beende Erfolgreich
-}
-
-bool remote_settingSet(settingHandle_t handle, uint32_t value) {
-    struct remote_setting_linked_list_t *currentSetting = (struct remote_setting_linked_list_t*) handle;
-    currentSetting->setting->value.ui = value;
-    #if (REMOTE_SETTINGS_USE_NVS == 1)
-        // NVS aktualisieren
-        nvs_handle nvsHandle;
-        if (nvs_open(currentSetting->taskTag, NVS_READWRITE, &nvsHandle)) return true;
-        if (nvs_set_u32(nvsHandle, currentSetting->settingTag, currentSetting->setting->value.ui)) return true; // Fehler beim speichern
         if (nvs_commit(nvsHandle)) return true;
         nvs_close(nvsHandle);
     #endif
-    currentSetting->updateCallback(currentSetting->updateCallbackCookie, currentSetting->setting);
-    return false;
+    return false; // Beende Erfolgreich
 }
 
 static esp_err_t remote_connectionEventHandler(void *ctx, system_event_t *event) {
@@ -426,7 +429,7 @@ static bool remote_initWlan(char* ssid, char* pw) {
 }
 
 static void remote_processMessage(struct remote_input_message_t *message) {
-    if (message->length < 2) return;
+    if (message->length < 1) return;
     switch (*message->data) {
         case 's': // Status
             if (*(message->data+1) != '1') return; // ToDo: Notstopp, Fehler
@@ -435,8 +438,11 @@ static void remote_processMessage(struct remote_input_message_t *message) {
             // ToDo -> Weiterleiten an control
             break;
         case 'l': // Log
-            memset(remote.disabledLogs, 0, sizeof(remote.disabledLogs) - 1);
-            memcpy(remote.disabledLogs, (message->data + 1), message->length);
+            memset(remote.disabledLogs, 0, 5);
+            memcpy(remote.disabledLogs, (message->data + 1), message->length - 1);
+            break;
+        case 'e': // Einstellungen
+            remote_processSetting(message);
             break;
         case 'r': // Report, wird vom Handy nicht verschickt
         default:
@@ -446,10 +452,12 @@ static void remote_processMessage(struct remote_input_message_t *message) {
 
 static void remote_sendMessage(struct remote_input_message_t *message) {
     if (remote.connected) {
-        if (message->ws) {
+        if (message->ws) { // spezifischer WS
             cgiWebsocketSend(&remote.httpd.httpdInstance, message->ws, message->data, message->length, WEBSOCK_FLAG_NONE);
-        } else {
-            cgiWebsockBroadcast(&remote.httpd.httpdInstance, "/ws", message->data, message->length, WEBSOCK_FLAG_NONE);
+        } else if (remote.ws) { // letzter WS
+            cgiWebsocketSend(&remote.httpd.httpdInstance, remote.ws, message->data, message->length, WEBSOCK_FLAG_NONE);
+        // } else { // alle WS (super unsicher)
+        //     cgiWebsockBroadcast(&remote.httpd.httpdInstance, "/ws", message->data, message->length, WEBSOCK_FLAG_NONE);
         }
     }
 }
@@ -466,6 +474,8 @@ static void remote_wsReceive(Websock *ws, char *data, int len, int flags) {
 }
 
 static void remote_wsConnect(Websock *ws) {
+    // als aktiver ws speichern
+    remote.ws = ws;
     // Event melden
 	struct remote_input_t input;
     input.type = REMOTE_INPUT_CONNECTED;
@@ -478,6 +488,8 @@ static void remote_wsConnect(Websock *ws) {
 }
 
 static void remote_wsDisconnect(Websock *ws) {
+    // inaktiv setzen
+    if (remote.ws == ws) remote.ws = NULL;
     // Event melden
 	struct remote_input_t input;
     input.type = REMOTE_INPUT_DISCONNECTED;
@@ -560,7 +572,7 @@ CgiStatus remote_sendEmbedded(HttpdConnData *connData) {
 }
 
 int remote_printLog(const char * format, va_list arguments) {
-    for (uint8_t i = 0; i < sizeof(remote.disabledLogs); ++i) {
+    for (uint8_t i = 0; i < 5; ++i) {
         if (format[0] == remote.disabledLogs[i]) {
             return remote.defaultLog(format, arguments);
         }
@@ -581,4 +593,76 @@ int remote_printLog(const char * format, va_list arguments) {
     input.message.timestamp = 0;
     xQueueSend(xRemote_input, &input, 0);
     return remote.defaultLog(format, arguments);
+}
+
+static bool remote_settingSet(struct remote_setting_linked_list_t *currentSetting, char *value) {
+    if (!currentSetting || !currentSetting->setting) return true;
+    // Wert auslesen
+    uint32_t valueNew;
+    switch (currentSetting->setting->type) {
+        case (SETTING_TYPE_UINT):
+            valueNew = (uint32_t) strtoul(value, NULL, 10);
+            break;
+        case (SETTING_TYPE_INT): {
+            int64_t i = strtol(value, NULL, 10);
+            if (i > INT32_MAX) i = INT32_MAX;
+            else if (i < INT32_MIN) i = INT32_MIN;
+            valueNew = (uint32_t) i;
+            break;
+        }
+        case (SETTING_TYPE_FLOAT):
+            valueNew = (uint32_t) strtof(value, NULL);
+            break;
+        default:
+            return true;
+    }
+    uint32_t valueOld = currentSetting->setting->value.ui;
+    currentSetting->setting->value.ui = valueNew;
+    ESP_LOGD("remote", "key %u -> %u", valueOld, valueNew);
+    // weiterleiten
+    if (currentSetting->updateCallback(currentSetting->updateCallbackCookie, currentSetting->setting)) {
+        currentSetting->setting->value.ui = valueOld; // wiederherstellen
+        ESP_LOGD("remote", "key wiederhergestellt");
+        return true;
+    }
+    // NVS aktualisieren
+    #if (REMOTE_SETTINGS_USE_NVS == 1)
+        nvs_handle nvsHandle;
+        if (nvs_open(currentSetting->taskTag, NVS_READWRITE, &nvsHandle)) return true;
+        if (nvs_set_u32(nvsHandle, currentSetting->settingTag, currentSetting->setting->value.ui)) return true; // Fehler beim speichern
+        if (nvs_commit(nvsHandle)) return true;
+        nvs_close(nvsHandle);
+    #endif
+    return false;
+}
+
+static void remote_processSetting(struct remote_input_message_t *message) {
+    // Tags aufschlüsseln
+    switch (*(message->data+1)) {
+        case ('?'): // Auflistung
+            break;
+        case ('v'): // aktueller Wert
+            break;
+        case ('s'): { // Wert aktualisieren -> esquadro2:abcd123:321
+            char *taskTag = strtok(message->data + 2, ":");
+            char *settingTag = strtok(NULL, ":");
+            char *value = strtok(NULL, ":");
+            struct remote_setting_linked_list_t *currentSetting = remote_settingSelect(taskTag, settingTag);
+            bool ret = remote_settingSet(currentSetting, value);
+            ESP_LOGD("remote", "settingSet -> %u", ret);
+            break;
+        }
+    }
+}
+
+struct remote_setting_linked_list_t* remote_settingSelect(char *taskTag, char *settingTag) {
+    // Liste durchsuchen
+    struct remote_setting_linked_list_t *currentSetting = remote.settingsHead;
+    while (currentSetting->next) {
+        if (!strcmp(taskTag, currentSetting->taskTag) && !strcmp(settingTag, currentSetting->settingTag)) {
+            return currentSetting;
+        }
+        currentSetting = currentSetting->next;
+    }
+    return NULL;
 }

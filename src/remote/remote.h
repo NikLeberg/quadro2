@@ -23,13 +23,13 @@
 
 /** Einstellungen **/
 
-#define REMOTE_SETTINGS_USE_NVS 0
+#define REMOTE_SETTINGS_USE_NVS 1
+#define REMOTE_CONNECTION_COUNT (10U)
 
 
 /** Variablendeklaration **/
 
 enum setting_type_t {
-    SETTING_TYPE_BOOL,
     SETTING_TYPE_UINT,
     SETTING_TYPE_INT,
     SETTING_TYPE_FLOAT
@@ -38,15 +38,13 @@ enum setting_type_t {
 struct setting_t {
     enum setting_type_t type;
     union {
-        bool b;
         uint32_t ui;
         int32_t i;
         float f;
     } value;
 };
 
-typedef uint32_t settingHandle_t;
-typedef void (remote_settingUpdate_t)(void *cookie, struct setting_t *setting);
+typedef bool (remote_settingUpdate_t)(void *cookie, struct setting_t *setting); // return true um Änderung abzulehnen
 
 
 /*
@@ -76,17 +74,4 @@ bool remote_init(char* ssid, char* pw);
  *
  * returns: Handle der Einstellung bei Erfolg, sonst NULL
  */
-settingHandle_t remote_settingRegister(const char* taskTag, const char* settingTag, remote_settingUpdate_t *updateCallback, void *updateCallbackCookie, struct setting_t *setting);
-
-/*
- * Function: remote_settingSet
- * ----------------------------
- * Registriert eine Einstellung und speichert diese persistent in NVS.
- * Vorgenommene Veränderungen werden dem Callback mitgeteilt.
- * 
- * settingHandle_t handle: Handle der Einstellung
- * uint32_t value: neuer Wert (ev. typecasteten)
- *
- * returns: false -> Erfolg, true -> Error
- */
-bool remote_settingSet(settingHandle_t handle, uint32_t value);
+bool remote_settingRegister(const char* taskTag, const char* settingTag, remote_settingUpdate_t *updateCallback, void *updateCallbackCookie, struct setting_t *setting);

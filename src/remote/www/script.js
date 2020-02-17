@@ -32,7 +32,7 @@ function processMessage(event) {
     if (functions.hasOwnProperty(type)) functions[type](message);
     // Timeout
     clearTimeout(ws.timeout);
-    ws.timeout = setTimeout(reconnect, 1000);
+    ws.timeout = setTimeout(reconnect, 2000);
     // Status anzeigen
     displayConnectivity();
 }
