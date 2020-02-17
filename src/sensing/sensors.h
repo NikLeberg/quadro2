@@ -37,7 +37,7 @@
 
 /** Einstellungen **/
 
-#define FUSION_RATE   100 // 100 ms, 10 Hz
+#define SENSORS_FUSION_RATE   100 // 100 ms, 10 Hz
 
 
 /*

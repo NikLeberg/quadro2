@@ -100,6 +100,7 @@ void sensors_setHome() {
     // bno hat kein Home, vielleicht aber Kalibrieren?
     ult_setHome();
     gps_setHome();
+    // Fusion zurücksetzen
     return;
 }
 
@@ -114,14 +115,19 @@ void sensors_task(void* arg) {
             switch (input.type) {
                 case (SENSORS_ACCELERATION): {
                     ESP_LOGI("sensors", "%llu,A,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z);
+                    // sensors_fuseX(input.type, input.vector.x, input.timestamp);
+                    // sensors_fuseY(input.type, input.vector.y, input.timestamp);
+                    // sensors_fuseZ(input.type, input.vector.z, input.timestamp);
                     break;
                 }
                 case (SENSORS_ULTRASONIC): {
                     ESP_LOGI("sensors", "%llu,U,%f", input.timestamp, input.distance);
+                    // sensors_fuseZ(input.type, input.distance, input.timestamp);
                     break;
                 }
                 case (SENSORS_ALTIMETER): {
                     ESP_LOGI("sensors", "%llu,B,%f", input.timestamp, input.distance);
+                    // sensors_fuseZ(input.type, input.distance, input.timestamp);
                     break;
                 }
                 case (SENSORS_ORIENTATION): {
@@ -129,11 +135,16 @@ void sensors_task(void* arg) {
                     break;
                 }
                 case (SENSORS_POSITION): {
-                    ESP_LOGI("sensors", "%llu,P,%f,%f,%f", input.timestamp, input.position.longitude, input.position.latitude, input.position.altitude);
+                    ESP_LOGI("sensors", "%llu,P,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z);
+                    // sensors_fuseX(input.type, input.vector.x, input.timestamp);
+                    // sensors_fuseY(input.type, input.vector.y, input.timestamp);
+                    // sensors_fuseZ(input.type, input.vector.z, input.timestamp);
                     break;
                 }
                 case (SENSORS_GROUNDSPEED): {
                     ESP_LOGI("sensors", "%llu,S,%f,%f", input.timestamp, input.vector.x, input.vector.y);
+                    // sensors_fuseX(input.type, input.vector.x, input.timestamp);
+                    // sensors_fuseY(input.type, input.vector.y, input.timestamp);
                     break;
                 }
             }

@@ -44,10 +44,6 @@ struct orientation_t { // Orientierung
     float real;
 };
 
-struct position_t { // Position
-    float latitude, longitude, altitude;
-};
-
 struct sensors_input_t {
     enum sensors_input_type_t type;
     int64_t timestamp;
@@ -55,7 +51,6 @@ struct sensors_input_t {
         struct vector_t vector;
         struct orientation_t orientation;
         float distance; // generische Distanz
-        struct position_t position;
     };
     float accuracy; // Genauigkeit der Daten
 };
