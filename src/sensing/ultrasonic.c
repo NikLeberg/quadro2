@@ -155,7 +155,7 @@ void ult_task(void* arg) {
         // Abstand weiterleiten an Sensortask
         struct sensors_input_t forward;
         forward.type = SENSORS_ULTRASONIC;
-        forward.timestamp = input.timestamp;
+        forward.timestamp = input.timestamp - (deltaT >> 1); // Messzeitpunkt war in der Hälfte der benötigten Zeit
         forward.distance = distance;
         xQueueSendToBack(xSensors_input, &forward, 0);
     }
