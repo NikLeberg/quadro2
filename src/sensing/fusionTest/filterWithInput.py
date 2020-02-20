@@ -10,7 +10,9 @@ warnings.simplefilter('error', RuntimeWarning)
 
 # Kalman Filter
 # Physik basierend auf konstanter Geschwindigkeit
-# per Input wird die Beschleunigung zur Geschwindigkeit integriert
+# bei Beschleunigungsmessung wird Status vorausgesagt, resp. Geschwindigkeit integriert per Input
+# bei den anderen Messungen wird gemäss einem konstanten Geschwindigkeitsmodell vorausgesagt
+# und anschliessend korrigiert.
 
 def main():
     dT = 0
@@ -19,8 +21,8 @@ def main():
     P = np.diag([0.1, 0.1]) # anfängliche Unsicherheit 0.1
     H = np.matrix([[1.0, 0.0],
                    [1.0, 0.0]])
-    rU = 0.005
-    rB = 1.0
+    rU = 0.0025
+    rB = 0.5
     R = np.diag([rU**2, rB**2]) # Unsicherheit der Messung (per Messung)
     F = np.identity(2) # Physikmodell (muss um dT in (0,1) angepasst werden)
     G = np.matrix([[0.0], [0.0]]) # Inputmodell (muss um dT angepasst werden)
@@ -30,7 +32,11 @@ def main():
     fl = [0.0]
     fu = [0.0]
     u = [0.0]
+    ul = [0.0]
+    uu = [0.0]
     b = [0.0]
+    bl = [0.0]
+    bu = [0.0]
     v = [0.0]
     vl = [0.0]
     vu = [0.0]
@@ -75,8 +81,8 @@ def main():
                     x = xHat
                     P = PHat
                     continue # nur Vorraussage bei Beschleunigung
-                # Update
                 else:
+                    # gemäss konstanter Geschwindigkeit voraussagen
                     xHat = F * x
                     PHat = F * P * F.T
 
@@ -107,26 +113,46 @@ def main():
                 fl.append(f[-1] - 2 * np.sqrt(abs(P[0, 0])))
                 fu.append(f[-1] + 2 * np.sqrt(abs(P[0, 0])))
                 v.append(x.item(1))
-                print(v[-1], P[1, 1])
                 vl.append(v[-1] - 2 * np.sqrt(abs(P[1, 1])))
                 vu.append(v[-1] + 2 * np.sqrt(abs(P[1, 1])))
                 u.append(z.item(0))
+                ul.append(u[-1] - 2 * np.sqrt(abs(S[0, 0])))
+                uu.append(u[-1] + 2 * np.sqrt(abs(S[0, 0])))
                 b.append(z.item(1))
+                bl.append(b[-1] - 2 * np.sqrt(abs(S[1, 1])))
+                bu.append(b[-1] + 2 * np.sqrt(abs(S[1, 1])))
 
-            except (StopIteration) as e: # np.linalg.LinAlgError
+            except (StopIteration, RuntimeWarning) as e: # np.linalg.LinAlgError
+                print(e)
                 break
 
 
         # Resultat
         plt.title('Fusion')
-        plt.plot(t, f, 'b', label='Fusion')
-        plt.plot(t, fl, 'b--')
-        plt.plot(t, fu, 'b--')
-        plt.plot(t, v, 'r', label='Geschwindigkeit')
-        plt.plot(t, vl, 'r--')
-        plt.plot(t, vu, 'r--')
-        plt.plot(t, u, label='Ultraschall')
-        plt.plot(t, b, label='Barometer')
+        if len(sys.argv) > 2:
+            toPlot = sys.argv[2]
+        else:
+            toPlot = "fvub"
+        if "f" in toPlot:
+            plt.plot(t, f, 'b', label='Fusion')
+            if "fe" in toPlot:
+                plt.plot(t, fl, 'b--')
+                plt.plot(t, fu, 'b--')
+        if "v" in toPlot:
+            plt.plot(t, v, 'r', label='Geschwindigkeit')
+            if "ve" in toPlot:
+                plt.plot(t, vl, 'r--')
+                plt.plot(t, vu, 'r--')
+        if "u" in toPlot:
+            plt.plot(t, u, 'g', label='Ultraschall')
+            if "ue" in toPlot:
+                plt.plot(t, ul, 'g--')
+                plt.plot(t, uu, 'g--')
+        if "b" in toPlot:
+            plt.plot(t, b, 'y', label='Barometer')
+            if "be" in toPlot:
+                plt.plot(t, bl, 'y--')
+                plt.plot(t, bu, 'y--')
         plt.ylim(-2.0, +2.0)
         plt.legend()
         plt.show()
