@@ -88,7 +88,7 @@ def main():
                     #if (abs(mValue) < 0.35): continue # kleine Beschleunigungen ignorieren
                     xHat = F * x + G * mValue # Beschleunigung zur Geschwindigkeit integrieren
                     Q = G * G.T * mValue
-                    PHat = (F * P * F.T) + Q + np.diag([0.0, 0.01])
+                    PHat = (F * P * F.T) + Q + np.diag([0.0, 0.02])
                     x = xHat
                     P = PHat
                     #continue # nur Vorraussage bei Beschleunigung
@@ -97,49 +97,49 @@ def main():
                     xHat = F * x
                     PHat = F * P * F.T
 
-                    # zurückgelegte Distanz (gemäss Voraussage)
-                    dX = abs(xHat.item(0) - x.item(0))
+                # zurückgelegte Distanz (gemäss Voraussage)
+                dX = abs(xHat.item(0) - x.item(0))
 
-                    # Messunsicherheit um dX erhöhen
-                    try:
-                        R[(0, 0)] = (((math.sqrt(R[(0, 0)]) * 2) + dX) / 2) **2
-                    except OverflowError:
-                        R[(0, 0)] = np.inf
-                    try:
-                        R[(1, 1)] = (((math.sqrt(R[(1, 1)]) * 2) + dX) / 2) **2
-                    except OverflowError:
-                        R[(1, 1)] = np.inf
+                # Messunsicherheit um dX erhöhen
+                try:
+                    R[(0, 0)] = (((math.sqrt(R[(0, 0)]) * 2) + dX) / 2) **2
+                except OverflowError:
+                    R[(0, 0)] = np.inf
+                try:
+                    R[(1, 1)] = (((math.sqrt(R[(1, 1)]) * 2) + dX) / 2) **2
+                except OverflowError:
+                    R[(1, 1)] = np.inf
 
-                    # Messung verarbeiten
-                    if mType == 'U':
-                        z.itemset(0, mValue)
-                        R[(0, 0)] = rU**2
-                    elif mType == 'B':
-                        z.itemset(1, mValue)
-                        R[(1, 1)] = rB**2
+                # Messung verarbeiten
+                if mType == 'U':
+                    z.itemset(0, mValue)
+                    R[(0, 0)] = rU**2
+                elif mType == 'B':
+                    z.itemset(1, mValue)
+                    R[(1, 1)] = rB**2
 
-                    # Gain rechnen und Korrigieren
-                    S = (H * P * H.T) + R
-                    K = (P * H.T) * np.linalg.inv(S)
-                    P = (I - (K * H)) * PHat
-                    x = xHat + K * (z - (H * xHat))
+                # Gain rechnen und Korrigieren
+                S = (H * P * H.T) + R
+                K = (P * H.T) * np.linalg.inv(S)
+                P = (I - (K * H)) * PHat
+                x = xHat + K * (z - (H * xHat))
 
                 # speichere für Plot
                 t.append(t[-1] + dT)
                 f.append(x.item(0))
-                #fl.append(f[-1] - 2 * np.sqrt(abs(P[0, 0])))
-                #fu.append(f[-1] + 2 * np.sqrt(abs(P[0, 0])))
+                fl.append(f[-1] - 2 * np.sqrt(abs(P[0, 0])))
+                fu.append(f[-1] + 2 * np.sqrt(abs(P[0, 0])))
                 v.append(x.item(1))
-                #vl.append(v[-1] - 2 * np.sqrt(abs(P[1, 1])))
-                #vu.append(v[-1] + 2 * np.sqrt(abs(P[1, 1])))
+                vl.append(v[-1] - 2 * np.sqrt(abs(P[1, 1])))
+                vu.append(v[-1] + 2 * np.sqrt(abs(P[1, 1])))
                 u.append(z.item(0))
-                #ul.append(u[-1] - 2 * np.sqrt(abs(S[0, 0])))
-                #uu.append(u[-1] + 2 * np.sqrt(abs(S[0, 0])))
+                ul.append(u[-1] - 2 * np.sqrt(abs(S[0, 0])))
+                uu.append(u[-1] + 2 * np.sqrt(abs(S[0, 0])))
                 b.append(z.item(1))
-                #bl.append(b[-1] - 2 * np.sqrt(abs(S[1, 1])))
-                #bu.append(b[-1] + 2 * np.sqrt(abs(S[1, 1])))
+                bl.append(b[-1] - 2 * np.sqrt(abs(S[1, 1])))
+                bu.append(b[-1] + 2 * np.sqrt(abs(S[1, 1])))
                 p.append(xHat.item(0))
-                d.append(xHat.item(0) - x.item(0))
+                d.append(dX)
 
             except (StopIteration) as e: # np.linalg.LinAlgError
                 print(e)
@@ -152,7 +152,7 @@ def main():
         if len(sys.argv) > 2:
             toPlot = sys.argv[2]
         else:
-            toPlot = "2fvub"
+            toPlot = "fvubpd2"
         if "f" in toPlot:
             plt.plot(t, f, 'b', label='Fusion')
             if "fe" in toPlot:
