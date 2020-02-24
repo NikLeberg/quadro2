@@ -20,8 +20,10 @@
 
 /** Einstellungen **/
 
-#define I2C_NUM         I2C_NUM_0
-#define I2C_CLOCK       440000
+#define I2C_NUM             I2C_NUM_0
+#define I2C_CLOCK           400000
+#define I2C_LOCK_TIMEOUT_MS 100
+#define I2C_BUS_TIMEOUT_MS  10
 
 
 /*
