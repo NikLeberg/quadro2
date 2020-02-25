@@ -147,7 +147,7 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin) {
     gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
     if (gpio_isr_handler_add(interruptPin, &bno_interrupt, NULL)) return true;
     // Task starten, pinned da Interrupt an CPU gebunden ist.
-    if (xTaskCreate(&bno_task, "bno", 3 * 1024, NULL, xSensors_PRIORITY + 1, &xBno_handle) != pdTRUE) return true;
+    if (xTaskCreatePinnedToCore(&bno_task, "bno", 3 * 1024, NULL, xSensors_PRIORITY + 1, &xBno_handle, xPortGetCoreID()) != pdTRUE) return true;
     // SensorHub-2 Bibliothek starten
     SemaphoreHandle_t sInitDone = xSemaphoreCreateBinary();
     if (sh2_initialize(&bno_initDone, sInitDone)) return true;
