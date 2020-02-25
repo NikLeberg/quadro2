@@ -528,6 +528,7 @@ static void remote_wsDisconnect(Websock *ws) {
 
 inline bool remote_sendCommand(char *command, Websock *ws) {
     char *string = (char*) malloc(128 * sizeof(char));
+    if (!string) return true;
     int length = strlen(command) + 1;
     if (length > 128) {
         free(string);
@@ -580,6 +581,7 @@ int remote_printLog(const char * format, va_list arguments) {
         }
     }
     char *string = (char*) malloc(128 * sizeof(char));
+    if (!string) return true;
     int length = 0;
     string[0] = 'l';
     length = vsnprintf(string + 1, 127, format, arguments) + 1;
