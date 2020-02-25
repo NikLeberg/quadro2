@@ -5,7 +5,10 @@ import websocket
 from datetime import datetime
 
 # Websocket Verbindung
-ws = websocket.create_connection("ws://192.168.1.118/ws")
+try:
+    ws = websocket.create_connection("ws://192.168.1.118/ws", timeout=10)
+except:
+    ws = websocket.create_connection("ws://192.168.43.55/ws", timeout=10)
 csv = open(datetime.now().strftime("log_%Y-%m-%d_%H-%M.csv"), "a")
 
 try:

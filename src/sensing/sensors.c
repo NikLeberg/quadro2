@@ -32,6 +32,8 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_log.h"
+#include <math.h>
+#include "eekf.h"
 
 
 /** Interne Abhängigkeiten **/
@@ -42,14 +44,18 @@
 #include "ultrasonic.h"
 #include "gps.h"
 #include "sensor_types.h"
+#include "sensors.h"
 
 
 /** Variablendeklaration **/
 
 struct sensors_t {
-    struct {
-        uint8_t dummy;
-    };
+    struct { // Fusion der Z Achse (Altitude)
+        eekf_context ekf;
+        eekf_mat x, P, u, Q, z, R;
+        int64_t lastTimestamp;
+        float accErrorUltrasonic, accErrorBarometer, accErrorGPS;
+    } Z;
 };
 static struct sensors_t sensors;
 
@@ -64,6 +70,12 @@ static struct sensors_t sensors;
  * void* arg: Dummy für FreeRTOS
  */
 void sensors_task(void* arg);
+
+// ToDo
+static void sensors_fuseZ(enum sensors_input_type_t type, float z, int64_t timestamp);
+eekf_return sensors_fuseZ_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const *x, eekf_mat const *u, void* userData);
+eekf_return sensors_fuseZ_measurement(eekf_mat* zp, eekf_mat* Jh, eekf_mat const *x, void* userData);
+static void sensors_fuseZ_reset();
 
 
 /** Implementierung **/
@@ -91,16 +103,24 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     ESP_LOGD("sensors", "GPS init");
     ret |= gps_init(gpsRxPin, gpsTxPin);
     ESP_LOGD("sensors", "GPS %s", ret ? "error" : "ok");
+    // Kalman Filter initialisieren
+    EEKF_CALLOC_MATRIX(sensors.Z.x, 2, 1);
+    EEKF_CALLOC_MATRIX(sensors.Z.P, 2, 2);
+    EEKF_CALLOC_MATRIX(sensors.Z.z, 3, 1);
+    sensors_fuseZ_reset();
+    eekf_init(&sensors.Z.ekf, &sensors.Z.x, &sensors.Z.P,
+              sensors_fuseZ_transition, sensors_fuseZ_measurement, NULL);
     // installiere task
     if (xTaskCreate(&sensors_task, "sensors", 3 * 1024, NULL, xSensors_PRIORITY, &xSensors_handle) != pdTRUE) return true;
     return ret;
 }
 
 void sensors_setHome() {
-    // bno hat kein Home, vielleicht aber Kalibrieren?
+    bno_setHome(); // nur Barometer
     ult_setHome();
     gps_setHome();
     // Fusion zurücksetzen
+    sensors_fuseZ_reset();
     return;
 }
 
@@ -114,35 +134,37 @@ void sensors_task(void* arg) {
         if (xQueueReceive(xSensors_input, &input, 5000 / portTICK_PERIOD_MS) == pdTRUE) {
             switch (input.type) {
                 case (SENSORS_ACCELERATION): {
-                    ESP_LOGI("sensors", "%llu,A,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z);
+                    ESP_LOGI("sensors", "%llu,A,%f,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z, input.accuracy);
                     // sensors_fuseX(input.type, input.vector.x, input.timestamp);
                     // sensors_fuseY(input.type, input.vector.y, input.timestamp);
-                    // sensors_fuseZ(input.type, input.vector.z, input.timestamp);
+                    sensors_fuseZ(input.type, input.vector.z, input.timestamp);
                     break;
                 }
                 case (SENSORS_ULTRASONIC): {
                     ESP_LOGI("sensors", "%llu,U,%f", input.timestamp, input.distance);
-                    // sensors_fuseZ(input.type, input.distance, input.timestamp);
+                    sensors_fuseZ(input.type, input.distance, input.timestamp);
                     break;
                 }
                 case (SENSORS_ALTIMETER): {
-                    ESP_LOGI("sensors", "%llu,B,%f", input.timestamp, input.distance);
-                    // sensors_fuseZ(input.type, input.distance, input.timestamp);
+                    ESP_LOGI("sensors", "%llu,B,%f,%f", input.timestamp, input.distance, input.accuracy);
+                    sensors_fuseZ(input.type, input.distance, input.timestamp);
                     break;
                 }
                 case (SENSORS_ORIENTATION): {
-                    ESP_LOGI("sensors", "%llu,O,%f,%f,%f,%f", input.timestamp, input.orientation.i, input.orientation.j, input.orientation.k, input.orientation.real);
+                    ESP_LOGI("sensors", "%llu,O,%f,%f,%f,%f,%f", input.timestamp, input.orientation.i, input.orientation.j, input.orientation.k, input.orientation.real, input.accuracy);
                     break;
                 }
                 case (SENSORS_POSITION): {
-                    ESP_LOGI("sensors", "%llu,P,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z);
+                    ESP_LOGI("sensors", "%llu,P,%f,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z, input.accuracy);
                     // sensors_fuseX(input.type, input.vector.x, input.timestamp);
                     // sensors_fuseY(input.type, input.vector.y, input.timestamp);
-                    // sensors_fuseZ(input.type, input.vector.z, input.timestamp);
+                    if (input.accuracy <= 2.0f) {
+                        sensors_fuseZ(input.type, input.vector.z, input.timestamp);
+                    }
                     break;
                 }
                 case (SENSORS_GROUNDSPEED): {
-                    ESP_LOGI("sensors", "%llu,S,%f,%f", input.timestamp, input.vector.x, input.vector.y);
+                    ESP_LOGI("sensors", "%llu,S,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.accuracy);
                     // sensors_fuseX(input.type, input.vector.x, input.timestamp);
                     // sensors_fuseY(input.type, input.vector.y, input.timestamp);
                     break;
@@ -157,4 +179,131 @@ void sensors_task(void* arg) {
             ESP_LOGD("sensors", "%llu,online", esp_timer_get_time());
         }
     }
+}
+
+static void sensors_fuseZ_reset() {
+    // Akkumulierter Fehler
+    sensors.Z.accErrorUltrasonic = 10000.0f;
+    sensors.Z.accErrorBarometer = 10000.0f;
+    sensors.Z.accErrorGPS = 10000.0f;
+    // Zustand
+    *EEKF_MAT_EL(sensors.Z.x, 0, 0) = 0.0f;
+    *EEKF_MAT_EL(sensors.Z.x, 1, 0) = 0.0f;
+    // Unsicherheit
+    *EEKF_MAT_EL(sensors.Z.P, 0, 0) = 10000.0f;
+    *EEKF_MAT_EL(sensors.Z.P, 0, 1) = 0.0f;
+    *EEKF_MAT_EL(sensors.Z.P, 1, 0) = 0.0f;
+    *EEKF_MAT_EL(sensors.Z.P, 1, 1) = 10000.0f;
+    // Messung
+    *EEKF_MAT_EL(sensors.Z.z, 0, 0) = 0.0f;
+    *EEKF_MAT_EL(sensors.Z.z, 1, 0) = 0.0f;
+    *EEKF_MAT_EL(sensors.Z.z, 2, 0) = 0.0f;
+    // DEBUG
+    ESP_LOGD("sensors", "F reset");
+}
+
+static void sensors_fuseZ(enum sensors_input_type_t type, float z, int64_t timestamp) {
+    // vergangene Zeit
+    if (timestamp < sensors.Z.lastTimestamp) return; // verspätete Messung
+    float dt = (timestamp - sensors.Z.lastTimestamp) / 1000.0f / 1000.0f;
+    ESP_LOGD("sensors", "0,FT1,%f", dt);
+    sensors.Z.lastTimestamp = timestamp;
+    float delta = dt;
+    sensors.Z.ekf.userData = (void*) &delta;
+    // Steuerinput
+    EEKF_DECL_MAT_INIT(u, 1, 1, type == SENSORS_ACCELERATION ? z : NAN);
+    // Unsicherheit der Voraussage
+    EEKF_DECL_MAT(Q, 2, 2);
+    if (type == SENSORS_ACCELERATION) {
+        *EEKF_MAT_EL(Q, 0, 0) = 0.25f * z * powf(dt, 4.0f) + SENSORS_FUSE_Z_Q_POSITION;
+        *EEKF_MAT_EL(Q, 0, 1) = 0.5f * z * powf(dt, 3.0f);
+        *EEKF_MAT_EL(Q, 1, 0) = 0.5f * z * powf(dt, 3.0f) + SENSORS_FUSE_Z_Q_VELOCITY;
+        *EEKF_MAT_EL(Q, 1, 1) = z * dt * dt;
+    } else {
+        *EEKF_MAT_EL(Q, 0, 0) = SENSORS_FUSE_Z_Q_POSITION;
+        *EEKF_MAT_EL(Q, 1, 1) = SENSORS_FUSE_Z_Q_VELOCITY;
+    }
+    // Voraussagen
+    eekf_return ret;
+    ret = eekf_predict(&sensors.Z.ekf, &u, &Q);
+    if (ret != eEekfReturnOk) { // Rechenfehler
+        ESP_LOGE("sensors", "fuse 1 error: %u", ret);
+        // sensors_fuseZ_reset();
+        return;
+    }
+    // Messunsicherheiten erhöhen
+    float dz = delta; // Differenz neuer zur alter Position
+    sensors.Z.accErrorUltrasonic += dz;
+    sensors.Z.accErrorBarometer += dz;
+    sensors.Z.accErrorGPS += dz;
+    // Unsicherheit für aktuelle Messung zurücksetzen
+    switch (type) {
+        case (SENSORS_ULTRASONIC):
+            sensors.Z.accErrorUltrasonic = SENSORS_FUSE_Z_R_ULTRASONIC;
+            *EEKF_MAT_EL(sensors.Z.z, 0, 0) = z;
+            break;
+        case (SENSORS_ALTIMETER):
+            sensors.Z.accErrorBarometer = SENSORS_FUSE_Z_R_BAROMETER;
+            *EEKF_MAT_EL(sensors.Z.z, 1, 0) = z;
+            break;
+        case (SENSORS_POSITION):
+            sensors.Z.accErrorGPS = SENSORS_FUSE_Z_R_GPS;
+            *EEKF_MAT_EL(sensors.Z.z, 2, 0) = z;
+        default:
+            break;
+    }
+    EEKF_DECL_MAT_INIT(R, 3, 3, powf(sensors.Z.accErrorUltrasonic / 2.0f, 2), 0.0f, 0.0f,
+                                0.0f, powf(sensors.Z.accErrorBarometer / 2.0f, 2), 0.0f,
+                                0.0f, 0.0f, powf(sensors.Z.accErrorGPS / 2.0f, 2));
+    // korrigieren
+    ret = eekf_correct(&sensors.Z.ekf, &sensors.Z.z, &R);
+    if (ret != eEekfReturnOk) { // Rechenfehler
+        ESP_LOGE("sensors", "fuse 2 error: %u", ret);
+        // sensors_fuseZ_reset();
+        return;
+    }
+    // DEBUG
+    ESP_LOGD("sensors", "0,F,%f", *EEKF_MAT_EL(sensors.Z.x, 0, 0));
+    ESP_LOGD("sensors", "0,FR,%f,%f,%f", sensors.Z.accErrorUltrasonic, sensors.Z.accErrorBarometer, sensors.Z.accErrorGPS);
+    // float P1 = 2.0f * sqrtf(fabsf(*EEKF_MAT_EL(sensors.Z.P, 0, 0)));
+    // float P2 = 2.0f * sqrtf(fabsf(*EEKF_MAT_EL(sensors.Z.P, 1, 1)));
+    // ESP_LOGD("sensors", "0,FP,%f,%f", P1, P2);
+    ESP_LOGD("sensors", "0,Fd,%f", dz);
+}
+
+eekf_return sensors_fuseZ_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const *x,
+                                     eekf_mat const *u, void* userData) {
+    float dt = *((float*) userData);
+    // Physikmodell
+    *EEKF_MAT_EL(*Jf, 0, 0) = 1.0f;
+    *EEKF_MAT_EL(*Jf, 0, 1) = dt;
+    *EEKF_MAT_EL(*Jf, 1, 0) = 0.0f;
+    *EEKF_MAT_EL(*Jf, 1, 1) = 1.0f;
+    // gemäss Modell vorausrechnen
+    // xp = F * x
+    if (NULL == eekf_mat_mul(xp, Jf, x)) return eEekfReturnComputationFailed;
+    // Beschleunigung als Input dazurechnen
+    if (!isnan(u->elements[0])) {
+        EEKF_DECL_MAT_INIT(G, 2, 1, 0.5f * dt * dt, dt);
+        EEKF_DECL_MAT_INIT(gu, 2, 1, 0);
+        // xp += G * u
+        if (NULL == eekf_mat_add(xp, xp, eekf_mat_mul(&gu, &G, u))) return eEekfReturnComputationFailed;
+    }
+    // Positionsdelta speichern
+    ESP_LOGD("sensors", "0,F-,%f,%f,%f,%f", xp->elements[0], xp->elements[1], x->elements[0], x->elements[1]);
+    *((float*) sensors.Z.ekf.userData) = fabsf(*EEKF_MAT_EL(*xp, 0, 0) - *EEKF_MAT_EL(*x, 0, 0)); 
+    return eEekfReturnOk;
+}
+
+eekf_return sensors_fuseZ_measurement(eekf_mat* zp, eekf_mat* Jh, eekf_mat const *x, void* userData) {
+    // Messmodell
+    *EEKF_MAT_EL(*Jh, 0, 0) = 1.0f;
+    *EEKF_MAT_EL(*Jh, 0, 1) = 0.0f;
+    *EEKF_MAT_EL(*Jh, 1, 0) = 1.0f;
+    *EEKF_MAT_EL(*Jh, 1, 1) = 0.0f;
+    *EEKF_MAT_EL(*Jh, 2, 0) = 1.0f;
+    *EEKF_MAT_EL(*Jh, 2, 1) = 0.0f;
+    // zp = H * x
+    if (NULL == eekf_mat_mul(zp, Jh, x)) return eEekfReturnComputationFailed;
+	return eEekfReturnOk;
 }

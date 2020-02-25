@@ -56,6 +56,9 @@ struct bno_t {
 
     portMUX_TYPE spinLock;
     sh2_RotationVectorWAcc_t lastOrientation;
+
+    bool setHome;
+    float homeAltitude;
 };
 static struct bno_t bno;
 
@@ -234,6 +237,11 @@ void bno_toWorldFrame(struct vector_t *vector) {
     return;
 }
 
+void bno_setHome() {
+    bno.setHome = true;
+    return;
+}
+
 static bool bno_sensorEnable(sh2_SensorId_t sensorId, uint32_t interval_us) {
     sh2_SensorConfig_t config;
     config.changeSensitivityEnabled = false;
@@ -276,6 +284,14 @@ static void bno_sensorEvent(void * cookie, sh2_SensorEvent_t *event) {
             forward.type = SENSORS_ALTIMETER;
             forward.distance = (228.15 / 0.0065) * (1 - powf(value.un.pressure.value / 1013.25, (1 / 5.255)));
             forward.accuracy = value.status & 0b00000011;
+            // Homepunkt anwenden
+            if (bno.setHome) {
+                bno.homeAltitude = forward.distance;
+                forward.distance = 0.0f;
+                bno.setHome = false;
+            } else {
+                forward.distance -= bno.homeAltitude;
+            }
             break;
         default:
             break;
