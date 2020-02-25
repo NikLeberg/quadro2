@@ -404,7 +404,9 @@ static esp_err_t remote_connectionEventHandler(void *ctx, system_event_t *event)
             }
             break;
         case SYSTEM_EVENT_STA_STOP:
-            esp_wifi_start();
+            #if (REMOTE_START_AFTER_STOP == 1)
+                esp_wifi_start();
+            #endif
             break;
         default:
             break;

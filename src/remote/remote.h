@@ -23,8 +23,9 @@
 
 /** Einstellungen **/
 
-#define REMOTE_SETTINGS_USE_NVS 1
-#define REMOTE_CONNECTION_COUNT (10U)
+#define REMOTE_SETTINGS_USE_NVS 1       // Einstellungen in NVS Partition persistent speichern
+#define REMOTE_CONNECTION_COUNT (10U)   // Anzahl gleichzeitiger Verbindungen
+#define REMOTE_START_AFTER_STOP 0       // Nach WLAN Error automatisch Verbindung neustarten
 
 
 /** Variablendeklaration **/
