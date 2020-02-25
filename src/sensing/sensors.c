@@ -50,6 +50,8 @@
 /** Variablendeklaration **/
 
 struct sensors_t {
+    int64_t timeouts[SENSORS_MAX];
+
     struct { // Fusion der Z Achse (Altitude)
         eekf_context ekf;
         eekf_mat x, P, u, Q, z, R;
@@ -111,7 +113,8 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     eekf_init(&sensors.Z.ekf, &sensors.Z.x, &sensors.Z.P,
               sensors_fuseZ_transition, sensors_fuseZ_measurement, NULL);
     // installiere task
-    if (xTaskCreate(&sensors_task, "sensors", 3 * 1024, NULL, xSensors_PRIORITY, &xSensors_handle) != pdTRUE) return true;
+    uint32_t otherCore = (xPortGetCoreID() == 0) ? 1 : 0;
+    if (xTaskCreatePinnedToCore(&sensors_task, "sensors", 3 * 1024, NULL, xSensors_PRIORITY, &xSensors_handle, otherCore) != pdTRUE) return true;
     return ret;
 }
 
@@ -132,48 +135,56 @@ void sensors_task(void* arg) {
     // Loop
     while (true) {
         if (xQueueReceive(xSensors_input, &input, 5000 / portTICK_PERIOD_MS) == pdTRUE) {
+            sensors.timeouts[input.type] = input.timestamp;
             switch (input.type) {
                 case (SENSORS_ACCELERATION): {
-                    ESP_LOGI("sensors", "%llu,A,%f,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z, input.accuracy);
+                    // ESP_LOGI("sensors", "%llu,A,%f,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z, input.accuracy);
                     // sensors_fuseX(input.type, input.vector.x, input.timestamp);
                     // sensors_fuseY(input.type, input.vector.y, input.timestamp);
                     sensors_fuseZ(input.type, input.vector.z, input.timestamp);
                     break;
                 }
-                case (SENSORS_ULTRASONIC): {
-                    ESP_LOGI("sensors", "%llu,U,%f", input.timestamp, input.distance);
-                    sensors_fuseZ(input.type, input.distance, input.timestamp);
+                case (SENSORS_ORIENTATION): {
+                    // ESP_LOGI("sensors", "%llu,O,%f,%f,%f,%f,%f", input.timestamp, input.orientation.i, input.orientation.j, input.orientation.k, input.orientation.real, input.accuracy);
                     break;
                 }
                 case (SENSORS_ALTIMETER): {
-                    ESP_LOGI("sensors", "%llu,B,%f,%f", input.timestamp, input.distance, input.accuracy);
+                    // ESP_LOGI("sensors", "%llu,B,%f,%f", input.timestamp, input.distance, input.accuracy);
                     sensors_fuseZ(input.type, input.distance, input.timestamp);
                     break;
                 }
-                case (SENSORS_ORIENTATION): {
-                    ESP_LOGI("sensors", "%llu,O,%f,%f,%f,%f,%f", input.timestamp, input.orientation.i, input.orientation.j, input.orientation.k, input.orientation.real, input.accuracy);
+                case (SENSORS_ULTRASONIC): {
+                    // ESP_LOGI("sensors", "%llu,U,%f", input.timestamp, input.distance);
+                    sensors_fuseZ(input.type, input.distance, input.timestamp);
                     break;
                 }
                 case (SENSORS_POSITION): {
-                    ESP_LOGI("sensors", "%llu,P,%f,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z, input.accuracy);
+                    // ESP_LOGI("sensors", "%llu,P,%f,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z, input.accuracy);
                     // sensors_fuseX(input.type, input.vector.x, input.timestamp);
                     // sensors_fuseY(input.type, input.vector.y, input.timestamp);
-                    if (input.accuracy <= 2.0f) {
-                        sensors_fuseZ(input.type, input.vector.z, input.timestamp);
-                    }
+                    sensors_fuseZ(input.type, input.vector.z, input.timestamp);
                     break;
                 }
                 case (SENSORS_GROUNDSPEED): {
-                    ESP_LOGI("sensors", "%llu,S,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.accuracy);
+                    // ESP_LOGI("sensors", "%llu,S,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.accuracy);
                     // sensors_fuseX(input.type, input.vector.x, input.timestamp);
                     // sensors_fuseY(input.type, input.vector.y, input.timestamp);
                     break;
                 }
+                default:
+                    continue;
             }
             // lösche wenn Platz gering wird
             if (uxQueueSpacesAvailable(xSensors_input) <= 1) {
                 xQueueReset(xSensors_input);
                 ESP_LOGE("sensors", "queue reset!");
+            }
+            // Timeouterkennung
+            input.timestamp = input.timestamp - (SENSORS_TIMEOUT_MS * 1000);
+            for (uint8_t i = 0; i < SENSORS_MAX; ++i) {
+                if (sensors.timeouts[i] < input.timestamp) {
+                    ESP_LOGE("sensors", "timeout of sensor %u", i);
+                }
             }
         } else {
             ESP_LOGD("sensors", "%llu,online", esp_timer_get_time());
@@ -199,14 +210,13 @@ static void sensors_fuseZ_reset() {
     *EEKF_MAT_EL(sensors.Z.z, 1, 0) = 0.0f;
     *EEKF_MAT_EL(sensors.Z.z, 2, 0) = 0.0f;
     // DEBUG
-    ESP_LOGD("sensors", "F reset");
+    ESP_LOGV("sensors", "fuseZ reset");
 }
 
 static void sensors_fuseZ(enum sensors_input_type_t type, float z, int64_t timestamp) {
     // vergangene Zeit
     if (timestamp < sensors.Z.lastTimestamp) return; // verspätete Messung
     float dt = (timestamp - sensors.Z.lastTimestamp) / 1000.0f / 1000.0f;
-    ESP_LOGD("sensors", "0,FT1,%f", dt);
     sensors.Z.lastTimestamp = timestamp;
     float delta = dt;
     sensors.Z.ekf.userData = (void*) &delta;
@@ -228,7 +238,7 @@ static void sensors_fuseZ(enum sensors_input_type_t type, float z, int64_t times
     ret = eekf_predict(&sensors.Z.ekf, &u, &Q);
     if (ret != eEekfReturnOk) { // Rechenfehler
         ESP_LOGE("sensors", "fuse 1 error: %u", ret);
-        // sensors_fuseZ_reset();
+        sensors_fuseZ_reset();
         return;
     }
     // Messunsicherheiten erhöhen
@@ -252,14 +262,14 @@ static void sensors_fuseZ(enum sensors_input_type_t type, float z, int64_t times
         default:
             break;
     }
-    EEKF_DECL_MAT_INIT(R, 3, 3, powf(sensors.Z.accErrorUltrasonic / 2.0f, 2), 0.0f, 0.0f,
-                                0.0f, powf(sensors.Z.accErrorBarometer / 2.0f, 2), 0.0f,
-                                0.0f, 0.0f, powf(sensors.Z.accErrorGPS / 2.0f, 2));
+    EEKF_DECL_MAT_INIT(R, 3, 3, powf(sensors.Z.accErrorUltrasonic / 2.0f, 2.0f), 0.0f, 0.0f,
+                                0.0f, powf(sensors.Z.accErrorBarometer / 2.0f, 2.0f), 0.0f,
+                                0.0f, 0.0f, powf(sensors.Z.accErrorGPS / 2.0f, 2.0f));
     // korrigieren
     ret = eekf_correct(&sensors.Z.ekf, &sensors.Z.z, &R);
     if (ret != eEekfReturnOk) { // Rechenfehler
         ESP_LOGE("sensors", "fuse 2 error: %u", ret);
-        // sensors_fuseZ_reset();
+        sensors_fuseZ_reset();
         return;
     }
     // DEBUG
@@ -289,6 +299,10 @@ eekf_return sensors_fuseZ_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const 
         // xp += G * u
         if (NULL == eekf_mat_add(xp, xp, eekf_mat_mul(&gu, &G, u))) return eEekfReturnComputationFailed;
     }
+    // Limits einhalten
+    float *predictedVelocity = EEKF_MAT_EL(*xp, 1, 0);
+    if (*predictedVelocity > SENSORS_FUSE_Z_X_VEL_LIMIT) *predictedVelocity = SENSORS_FUSE_Z_X_VEL_LIMIT;
+    else if (*predictedVelocity < -SENSORS_FUSE_Z_X_VEL_LIMIT) *predictedVelocity = -SENSORS_FUSE_Z_X_VEL_LIMIT;
     // Positionsdelta speichern
     ESP_LOGD("sensors", "0,F-,%f,%f,%f,%f", xp->elements[0], xp->elements[1], x->elements[0], x->elements[1]);
     *((float*) sensors.Z.ekf.userData) = fabsf(*EEKF_MAT_EL(*xp, 0, 0) - *EEKF_MAT_EL(*x, 0, 0)); 

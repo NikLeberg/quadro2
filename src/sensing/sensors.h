@@ -37,13 +37,13 @@
 
 /** Einstellungen **/
 
-#define SENSORS_FUSION_RATE   100 // 100 ms, 10 Hz
-// Fusionsparameter
+#define SENSORS_TIMEOUT_MS          5000
 #define SENSORS_FUSE_Z_Q_POSITION   0.0f
 #define SENSORS_FUSE_Z_Q_VELOCITY   0.01f
 #define SENSORS_FUSE_Z_R_ULTRASONIC 0.005f
 #define SENSORS_FUSE_Z_R_BAROMETER  0.3f
 #define SENSORS_FUSE_Z_R_GPS        1.0f
+#define SENSORS_FUSE_Z_X_VEL_LIMIT  100.0f // +/- 100 m/s
 
 
 /*

@@ -196,10 +196,10 @@ void gps_task(void* arg) {
         // uint8_t hour = input.frame[14];
         // uint8_t minute = input.frame[15];
         // uint8_t second = input.frame[16];
-        // Fix-Typ
+        // Fix-Typ & Satelitenanzahl
         uint8_t fixType = input.frame[26];
-        // Satelitenanzahl
         uint8_t satNum = input.frame[29];
+        if (fixType == 0 || satNum == 0) continue; // noch kein Fix
         // Position als x = Longitude / y = Latitude / z = Altitude
         forward.type = SENSORS_POSITION;
         forward.vector.x = (int32_t) ((input.frame[33] << 24) | (input.frame[32] << 16) | (input.frame[31] << 8) | (input.frame[30])) * 1e-7; // °
@@ -326,6 +326,7 @@ static void IRAM_ATTR gps_interrupt(void* arg) {
                     }
                     // Speicher für Frame allozieren und Header rekonstruieren;
                     frame = (uint8_t*) calloc(frameSize, sizeof(uint8_t));
+                    if (!frame) continue;
                     frame[0] = 0xb5;
                     frame[1] = 0x62;
                     frame[2] = class;

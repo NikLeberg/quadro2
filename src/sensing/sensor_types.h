@@ -27,7 +27,8 @@ enum sensors_input_type_t {
     SENSORS_ALTIMETER, // umgerechneter Druck Pa -> m
     SENSORS_ULTRASONIC, // m
     SENSORS_POSITION, // GPS Fix lat/lon/alt
-    SENSORS_GROUNDSPEED // m/s
+    SENSORS_GROUNDSPEED, // m/s
+    SENSORS_MAX
 };
 
 struct vector_t { // generischer Vektor
