@@ -252,7 +252,7 @@ static void sensors_fuseZ(enum sensors_input_type_t type, float z, int64_t times
         }
         // Ausführen
         eekf_return ret;
-        ret = eekf_correct(&sensors.Z.ekf, &sensors.Z.z, &R);
+        ret = eekf_lazy_correct(&sensors.Z.ekf, &sensors.Z.z, &R);
         if (ret != eEekfReturnOk) { // Rechenfehler
             ESP_LOGE("sensors", "fuseZ correct error: %u", ret);
         }

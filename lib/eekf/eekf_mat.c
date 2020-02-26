@@ -240,7 +240,7 @@ eekf_mat* eekf_mat_fw_sub(eekf_mat *X, eekf_mat const *L, eekf_mat const *B)
     return X;
 }
 
-eekf_mat* eekf_mat_lazy_pinv(eekf_mat *I, eekf_mat const *A)
+eekf_mat* eekf_mat_diag_pinv(eekf_mat *I, eekf_mat const *A)
 {
     if (NULL == I || NULL == A || A->rows != I->rows || A->cols != I->cols)
     {

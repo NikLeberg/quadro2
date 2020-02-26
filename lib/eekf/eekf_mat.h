@@ -150,6 +150,15 @@ eekf_mat* eekf_mat_chol(eekf_mat *L, eekf_mat const *A);
  */
 eekf_mat* eekf_mat_fw_sub(eekf_mat *X, eekf_mat const *L, eekf_mat const *B);
 
-eekf_mat* eekf_mat_lazy_pinv(eekf_mat *I, eekf_mat const *A);
+/**
+ * Computes the pseudoinverse of a diagonal Matrix.
+ * 
+ * If the matrix is not diagonal, returns NULL
+ *
+ * @param [out] I pointer to matrix to hold the result
+ * @param [in]  A pointer to matrix to be inversed
+ * @return returns the pointer to result matrix on success, NULL otherwise
+ */
+eekf_mat* eekf_mat_diag_pinv(eekf_mat *I, eekf_mat const *A);
 
 #endif /* EEKF_MAT_H */

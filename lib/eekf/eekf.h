@@ -153,4 +153,7 @@ eekf_return eekf_correct(eekf_context *ctx, eekf_mat const *z,
  */
 eekf_value eekf_randn();
 
+eekf_return eekf_lazy_correct(eekf_context *ctx, eekf_mat const *z,
+        eekf_mat const *R);
+
 #endif /* EEKF_H */
