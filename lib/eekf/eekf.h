@@ -42,6 +42,10 @@ typedef enum
 	eEekfReturnCallbackFailed,		//!< a callback function failed
 	eEekfReturnComputationFailed,	//!< a computation failed
 	eEekfReturnParameterError,		//!< function parameters are invalid
+	eEekfReturnCovarianceFailed,
+	eEekfReturnCholFailed,
+	eEekfReturnInterFailed,
+	eEekfReturnCorrFailed
 } eekf_return;
 
 /**

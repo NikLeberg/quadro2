@@ -150,4 +150,6 @@ eekf_mat* eekf_mat_chol(eekf_mat *L, eekf_mat const *A);
  */
 eekf_mat* eekf_mat_fw_sub(eekf_mat *X, eekf_mat const *L, eekf_mat const *B);
 
+eekf_mat* eekf_mat_lazy_pinv(eekf_mat *I, eekf_mat const *A);
+
 #endif /* EEKF_MAT_H */
