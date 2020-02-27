@@ -190,16 +190,6 @@ static void remote_wsConnect(Websock *ws);
 static void remote_wsDisconnect(Websock *ws);
 
 /*
- * Function: remote_sensorData
- * ----------------------------
- * Callback für BNO-Task, wird ausgeführt wenn Sensordaten in gewünschter Frequenz
- * empfangen wurden. Leitet Daten in formatierter Form dem eigenen Task weiter.
- * 
- * sh2_SensorValue_t value: Sensor Event & Daten
- */
-// static void remote_sensorData(sh2_SensorValue_t value);
-
-/*
  * Function: remote_sendEmbedded
  * ----------------------------
  * Callback für httpd-Server. Sendet in der Firmware enthaltene Binärfiles.
@@ -287,9 +277,6 @@ bool remote_init(char* ssid, char* pw) {
 	if (httpdFreertosStart(&remote.httpd)) return true;
     esp_log_level_set("cgiwebsocket", ESP_LOG_INFO);
     esp_log_level_set("httpd-freertos", ESP_LOG_INFO);
-    // Sensorcallbacks registrieren (2 Hz)
-    // bno_sensorRegister(SH2_LINEAR_ACCELERATION, 500000, &remote_sensorData);
-    // bno_sensorRegister(SH2_ROTATION_VECTOR, 500000, &remote_sensorData);
     // Log umleiten
     remote.defaultLog = esp_log_set_vprintf(&remote_printLog);
     return false;
@@ -406,6 +393,8 @@ static esp_err_t remote_connectionEventHandler(void *ctx, system_event_t *event)
         case SYSTEM_EVENT_STA_STOP:
             #if (REMOTE_START_AFTER_STOP == 1)
                 esp_wifi_start();
+            #elif (REMOTE_RESET_AFTER_STOP == 1)
+                esp_restart();
             #endif
             break;
         default:
@@ -458,8 +447,6 @@ static void remote_sendMessage(struct remote_input_message_t *message) {
             cgiWebsocketSend(&remote.httpd.httpdInstance, message->ws, message->data, message->length, WEBSOCK_FLAG_NONE);
         } else if (remote.ws) { // letzter WS
             cgiWebsocketSend(&remote.httpd.httpdInstance, remote.ws, message->data, message->length, WEBSOCK_FLAG_NONE);
-        // } else { // alle WS (super unsicher)
-        //     cgiWebsockBroadcast(&remote.httpd.httpdInstance, "/ws", message->data, message->length, WEBSOCK_FLAG_NONE);
         }
     }
 }
@@ -497,34 +484,6 @@ static void remote_wsDisconnect(Websock *ws) {
     input.type = REMOTE_INPUT_DISCONNECTED;
     xQueueSend(xRemote_input, &input, 0);
 }
-
-// static void remote_sensorData(sh2_SensorValue_t value) {
-//     char *string = (char*) malloc(128 * sizeof(char));
-//     int length = 0;
-//     switch (value.sensorId) {
-//         case SH2_LINEAR_ACCELERATION: {
-//             sh2_Accelerometer_t *acceleration = &value.un.linearAcceleration;
-//             length = snprintf(string, 128, "ra%f,%f,%f", acceleration->x, acceleration->y, acceleration->z);
-//             break;
-//         }
-//         case SH2_ROTATION_VECTOR: {
-//             sh2_RotationVectorWAcc_t *rotation = &value.un.rotationVector;
-//             length = snprintf(string, 128, "ro%f,%f,%f,%f,%f", rotation->accuracy, rotation->i, rotation->j, rotation->k, rotation->real);
-//             break;
-//         }
-//     }
-//     if (length <= 0 || length > 128) {
-//         free(string);
-//         return;
-//     }
-//     struct remote_input_t input;
-//     input.type = REMOTE_INPUT_MESSAGE_SEND;
-//     input.message.ws = NULL; // Broadcast
-//     input.message.length = length;
-//     input.message.data = string;
-//     input.message.timestamp = 0;
-//     xQueueSend(xRemote_input, &input, 0);
-// }
 
 inline bool remote_sendCommand(char *command, Websock *ws) {
     char *string = (char*) malloc(128 * sizeof(char));
