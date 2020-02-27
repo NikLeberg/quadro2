@@ -124,7 +124,7 @@ eekf_return eekf_correct(eekf_context *ctx, eekf_mat const *z,
         // cross covariance
         if (NULL == eekf_mat_mul(&PJht, ctx->P, eekf_mat_trs(&Ct, &Jh)))
         {
-            return eEekfReturnCovarianceFailed;
+            return eEekfReturnComputationFailed;
         }
     }
 
@@ -136,7 +136,7 @@ eekf_return eekf_correct(eekf_context *ctx, eekf_mat const *z,
         if (NULL == eekf_mat_chol(&L, eekf_mat_add( // innovation covariance
                 &S, eekf_mat_mul(&S, &Jh, &PJht), R)))
         {
-            return eEekfReturnCholFailed; // eEekfReturnComputationFailed
+            return eEekfReturnComputationFailed;
         }
     }
 
@@ -150,7 +150,7 @@ eekf_return eekf_correct(eekf_context *ctx, eekf_mat const *z,
                         eekf_mat_fw_sub(&LPCtt, &L,
                                 eekf_mat_trs(&PCtt, &PJht))))
         {
-            return eEekfReturnInterFailed;
+            return eEekfReturnComputationFailed;
         }
     }
 
@@ -167,7 +167,7 @@ eekf_return eekf_correct(eekf_context *ctx, eekf_mat const *z,
                                 eekf_mat_fw_sub(&Ldz, &L,
                                         eekf_mat_sub(&dz, z, &zp)))))
         {
-            return eEekfReturnCorrFailed;
+            return eEekfReturnComputationFailed;
         }
     }
 
@@ -230,7 +230,7 @@ eekf_return eekf_lazy_correct(eekf_context *ctx, eekf_mat const *z,
     EEKF_DECL_MAT_DYN(Ct, Jh.cols, Jh.rows);
     if (NULL == eekf_mat_mul(&PJht, ctx->P, eekf_mat_trs(&Ct, &Jh)))
     {
-        return eEekfReturnCovarianceFailed;
+        return eEekfReturnComputationFailed;
     }
 
     // compute pseudo inverse of innovation covariance S = (Jh*P*Jh' + R)
@@ -238,7 +238,7 @@ eekf_return eekf_lazy_correct(eekf_context *ctx, eekf_mat const *z,
     if (NULL == eekf_mat_diag_pinv(&SI, eekf_mat_add( // innovation covariance
             &S, eekf_mat_mul(&S, &Jh, &PJht), R)))
     {
-        return eEekfReturnCholFailed; // eEekfReturnComputationFailed
+        return eEekfReturnComputationFailed;
     }
     
     // compute Kalman gain
@@ -246,7 +246,7 @@ eekf_return eekf_lazy_correct(eekf_context *ctx, eekf_mat const *z,
     EEKF_DECL_MAT_DYN(K, PJht.cols, PJht.rows);
     if (NULL == eekf_mat_mul(&K, &PJht, &SI))
     {
-        return eEekfReturnInterFailed;
+        return eEekfReturnComputationFailed;
     }
 
     // correct state
@@ -258,7 +258,7 @@ eekf_return eekf_lazy_correct(eekf_context *ctx, eekf_mat const *z,
                     eekf_mat_mul(&Kz, &K,
                             eekf_mat_sub(&dz, z, &zp))))
     {
-        return eEekfReturnCorrFailed;
+        return eEekfReturnComputationFailed;
     }
 
     // correct covariance
