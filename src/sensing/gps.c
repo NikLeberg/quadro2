@@ -166,7 +166,7 @@ bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
     uint8_t msgMessages[] = {0xB5, 0x62, 0x06, 0x01, 0x03, 0x00, 0x01, 0x07, 0x01, 0x13, 0x51};
     if (gps_sendUBX(msgMessages, sizeof(msgMessages), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
     // UBX-CFG-RATE: Daten-Rate setzen
-    uint8_t msgRate[] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, (0xff & GPS_DATA_RATE), (GPS_DATA_RATE >> 8), 0x01, 0x00, 0x00, 0x00, NULL, NULL};
+    uint8_t msgRate[] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, (0xff & GPS_DATA_RATE_MS), (GPS_DATA_RATE_MS >> 8), 0x01, 0x00, 0x00, 0x00, NULL, NULL};
     if (gps_sendUBX(msgRate, sizeof(msgRate), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
     // Task starten, pinned da UART Interrupt an CPU gebunden ist.
     if (xTaskCreatePinnedToCore(&gps_task, "gps", 3 * 1024, NULL, xSensors_PRIORITY + 1, &xGps_handle, xPortGetCoreID()) != pdTRUE) return true;
@@ -187,34 +187,35 @@ void gps_task(void* arg) {
         if (input.frame) free(input.frame); // altes Frame freigeben
         xQueueReceive(xGps_input, &input, portMAX_DELAY);
         if (input.length < 92 + 8) continue; // Mindestlänge (Payload + Header)
-        if (input.frame[2] != 0x01 && input.frame[3] != 0x07) continue; // kein UBX-NAV-PVT Frame
+        uint8_t *f = input.frame;
+        if (f[2] != 0x01 && f[3] != 0x07) continue; // kein UBX-NAV-PVT Frame
         forward.timestamp = input.timestamp;
         // // Zeit
-        // uint16_t jear = (input.frame[11] << 8) | (input.frame[10]);
-        // uint8_t month = input.frame[12];
-        // uint8_t day = input.frame[13];
-        // uint8_t hour = input.frame[14];
-        // uint8_t minute = input.frame[15];
-        // uint8_t second = input.frame[16];
+        // uint16_t jear = (f[11] << 8) | (f[10]);
+        // uint8_t month = f[12];
+        // uint8_t day = f[13];
+        // uint8_t hour = f[14];
+        // uint8_t minute = f[15];
+        // uint8_t second = f[16];
         // Fix-Typ & Satelitenanzahl
-        uint8_t fixType = input.frame[26];
-        uint8_t satNum = input.frame[29];
-        if (fixType == 0 || satNum == 0) continue; // noch kein Fix
+        uint8_t fixType = f[26];
+        // uint8_t satNum = f[29];
+        if (fixType == 0 || fixType == 5) continue; // noch kein Fix oder nur Zeit-Fix
         // Position als x = Longitude / y = Latitude / z = Altitude
         forward.type = SENSORS_POSITION;
-        forward.vector.x = (int32_t) ((input.frame[33] << 24) | (input.frame[32] << 16) | (input.frame[31] << 8) | (input.frame[30])) * 1e-7; // °
-        forward.vector.y = (int32_t) ((input.frame[37] << 24) | (input.frame[36] << 16) | (input.frame[35] << 8) | (input.frame[34])) * 1e-7; // °
-        forward.vector.z = (int32_t) ((input.frame[45] << 24) | (input.frame[44] << 16) | (input.frame[43] << 8) | (input.frame[42])) / 1e+3; // m
-        float hAccuracy = (uint32_t) ((input.frame[49] << 24) | (input.frame[48] << 16) | (input.frame[47] << 8) | (input.frame[46])) / 1e+3;
-        float vAccuracy = (uint32_t) ((input.frame[53] << 24) | (input.frame[52] << 16) | (input.frame[51] << 8) | (input.frame[50])) / 1e+3;
+        forward.vector.x = (int32_t) ((f[33] << 24) | (f[32] << 16) | (f[31] << 8) | (f[30])) * 1e-7; // °
+        forward.vector.y = (int32_t) ((f[37] << 24) | (f[36] << 16) | (f[35] << 8) | (f[34])) * 1e-7; // °
+        forward.vector.z = (int32_t) ((f[45] << 24) | (f[44] << 16) | (f[43] << 8) | (f[42])) / 1e+3; // m
+        float hAccuracy = (uint32_t) ((f[49] << 24) | (f[48] << 16) | (f[47] << 8) | (f[46])) / 1e+3;
+        float vAccuracy = (uint32_t) ((f[53] << 24) | (f[52] << 16) | (f[51] << 8) | (f[50])) / 1e+3;
         if (hAccuracy > vAccuracy) forward.accuracy = hAccuracy;
         else forward.accuracy = vAccuracy;
         // Longitude & Latitude in Meter umrechnen
         // -> https://gis.stackexchange.com/questions/2951
         forward.vector.x *= 111111.0f * cosf(forward.vector.y * M_PI / 180.0f);
         forward.vector.y *= 111111.0f;
-        // Homepunkt anwenden (aber nur bei 3D-Fix & mindestens 3 Satelliten)
-        if (gps.setHome && fixType == 3 && satNum > 2) {
+        // Homepunkt anwenden (aber nur bei 3D-Fix & DOP < 5 m)
+        if (gps.setHome && fixType >= 3 && forward.accuracy <= 5.0f) {
             gps.home = forward.vector;
             forward.vector.x = 0.0f;
             forward.vector.y = 0.0f;
@@ -222,19 +223,16 @@ void gps_task(void* arg) {
             gps.setHome = false;
         } else {
             forward.vector.x -= gps.home.x;
-            forward.vector.y -= gps.home.x;
-            forward.vector.z -= gps.home.x;
+            forward.vector.y -= gps.home.y;
+            forward.vector.z -= gps.home.z;
         }
         xQueueSendToBack(xSensors_input, &forward, 0);
-        // Geschwindigkeit über Boden
-        forward.type = SENSORS_GROUNDSPEED;
-        float speed = (int32_t) ((input.frame[69] << 24) | (input.frame[68] << 16) | (input.frame[67] << 8) | (input.frame[66])) / 1e+3;
-        float heading = (uint32_t) ((input.frame[73] << 24) | (input.frame[72] << 16) | (input.frame[71] << 8) | (input.frame[70])) * 1e-5;
-        forward.vector.x = speed * cosf(heading * M_PI / 180.0);
-        forward.vector.y = speed * sinf(heading * M_PI / 180.0);
-        forward.vector.z = 0;
-        // ToDo: Genauigkeit
-        forward.accuracy = 0;
+        // Geschwindigkeit
+        forward.type = SENSORS_GROUNDSPEED; // ToDo: xy-Zuordnung und Vorzeichen könnten noch falsch sein! (NED)
+        forward.vector.x = (int32_t) ((f[57] << 24) | (f[56] << 16) | (f[55] << 8) | (f[54])) / 1e+3;
+        forward.vector.y = (int32_t) ((f[61] << 24) | (f[60] << 16) | (f[59] << 8) | (f[58])) / 1e+3;
+        forward.vector.z = (int32_t) ((f[65] << 24) | (f[64] << 16) | (f[63] << 8) | (f[62])) / 1e+3;
+        forward.accuracy = (uint32_t) ((f[77] << 24) | (f[76] << 16) | (f[75] << 8) | (f[74])) / 1e+3;
         xQueueSendToBack(xSensors_input, &forward, 0);
     }
 }

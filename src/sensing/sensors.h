@@ -39,11 +39,13 @@
 
 #define SENSORS_TIMEOUT_MS                  2000
 
-#define SENSORS_FUSE_Z_ERROR_ACCELERATION   0.35f   // +/- 0.35 m/s2
-#define SENSORS_FUSE_Z_ERROR_ULTRASONIC     0.005f  // +/- 5 mm
-#define SENSORS_FUSE_Z_ERROR_BAROMETER      0.3f    // +/- 30 cm
-#define SENSORS_FUSE_Z_ERROR_GPS            1.0f    // +/- 1 m
-#define SENSORS_FUSE_Z_X_VEL_LIMIT          100.0f  // +/- 100 m/s
+// Sensorfehler, r = (Fehler / 2)**2
+#define SENSORS_FUSE_Z_ERROR_ACCELERATION   0.030625f   // +/- 0.35 m/s2
+#define SENSORS_FUSE_Z_ERROR_ULTRASONIC     0.00000625f // +/- 5 mm
+#define SENSORS_FUSE_Z_ERROR_BAROMETER      0.0225f     // +/- 30 cm
+#define SENSORS_FUSE_Z_ERROR_GPS            0.25f       // +/- 1 m
+// Limits
+#define SENSORS_FUSE_Z_X_VEL_LIMIT          100.0f      // +/- 100 m/s
 
 
 /*

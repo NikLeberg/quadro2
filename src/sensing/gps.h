@@ -19,8 +19,8 @@
 
 /** Einstellungen **/
 
-#define GPS_UART        UART_NUM_1
-#define GPS_DATA_RATE   1000 // 100 ms, 10 Hz
+#define GPS_UART            UART_NUM_1
+#define GPS_DATA_RATE_MS    100 // 10 Hz
 
 
 /*

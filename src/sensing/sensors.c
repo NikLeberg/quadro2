@@ -164,9 +164,10 @@ void sensors_task(void* arg) {
                     break;
                 }
                 case (SENSORS_GROUNDSPEED): {
-                    // ESP_LOGI("sensors", "%llu,S,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.accuracy);
+                    ESP_LOGI("sensors", "%llu,S,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.accuracy);
                     // sensors_fuseX(input.type, input.vector.x, input.timestamp);
                     // sensors_fuseY(input.type, input.vector.y, input.timestamp);
+                    // sensors_fuseZ(input.type, input.vector.z, input.timestamp);
                     break;
                 }
                 default:
@@ -248,7 +249,7 @@ static void sensors_fuseZ(enum sensors_input_type_t type, float z, int64_t times
                 *EEKF_MAT_EL(sensors.Z.z, 2, 0) = z;
                 *EEKF_MAT_EL(R, 2, 2) = SENSORS_FUSE_Z_ERROR_GPS;
             default:
-                break;
+                return; // unbekannter Sensortyp
         }
         // Ausführen
         eekf_return ret;
@@ -258,7 +259,7 @@ static void sensors_fuseZ(enum sensors_input_type_t type, float z, int64_t times
         }
     }
     // DEBUG
-    ESP_LOGD("sensors", "0,F,%f", *EEKF_MAT_EL(sensors.Z.x, 0, 0));
+    ESP_LOGD("sensors", "F,%f,Z,%f,%f,%f", *EEKF_MAT_EL(sensors.Z.x, 0, 0), *EEKF_MAT_EL(sensors.Z.z, 0, 0), *EEKF_MAT_EL(sensors.Z.z, 1, 0), *EEKF_MAT_EL(sensors.Z.z, 2, 0));
 }
 
 eekf_return sensors_fuseZ_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const *x,
