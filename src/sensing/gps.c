@@ -96,7 +96,7 @@ static bool gps_sendUBX(uint8_t *buffer, uint8_t length, bool aknowledge, TickTy
  *
  * void* arg: Dummy
  */
-static void IRAM_ATTR gps_interrupt(void* arg);
+static void gps_interrupt(void* arg);
 
 /*
  * Function: gps_uartBaudrate
@@ -133,7 +133,7 @@ static uint32_t gps_uartAutoBaud();
  * ----------------------------
  * Leere UART FIFO.
  */
-static void IRAM_ATTR gps_uartRxFifoReset();
+static void gps_uartRxFifoReset();
 
 
 /** Implementierung **/
@@ -273,7 +273,7 @@ static bool gps_sendUBX(uint8_t *buffer, uint8_t length, bool aknowledge, TickTy
     else return true; // Ungültige Antwort
 }
 
-static void IRAM_ATTR gps_interrupt(void* arg) {
+static void gps_interrupt(void* arg) {
     uart_dev_t *uart = UART[GPS_UART];
     BaseType_t woken = pdFALSE;
     uint32_t status = uart->int_st.val;
@@ -401,10 +401,8 @@ static bool gps_uartEnable(gpio_num_t txPin, gpio_num_t rxPin) {
     if (uart_set_pin(GPS_UART, txPin, rxPin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE)) return true;
     // Baud
     gps_uartBaudrate(9600);
-    // uint32_t baud = gps_uart_auto_baud();
-    // ESP_LOGD("gps", "auto-baud -> %u", baud);
     // Interrupt Handler registrieren
-    if (esp_intr_alloc(ETS_UART0_INTR_SOURCE + GPS_UART, ESP_INTR_FLAG_IRAM, gps_interrupt, NULL, NULL)) return true;
+    if (esp_intr_alloc(ETS_UART0_INTR_SOURCE + GPS_UART, 0, gps_interrupt, NULL, NULL)) return true;
     // Interrupts aktivieren
     uart->int_clr.val = UART_INTR_MASK;
     uart->conf1.rx_tout_thrhd = 10; // Interrupt nach Ende eines Frames
@@ -415,7 +413,7 @@ static bool gps_uartEnable(gpio_num_t txPin, gpio_num_t rxPin) {
     return false;
 }
 
-static uint32_t IRAM_ATTR gps_uartAutoBaud() {
+static uint32_t gps_uartAutoBaud() {
     uart_dev_t *uart = UART[GPS_UART];
     uint32_t low_period = 0, high_period = 0;
     uint32_t intena_reg = uart->int_ena.val;
@@ -445,7 +443,7 @@ static uint32_t IRAM_ATTR gps_uartAutoBaud() {
     return APB_CLK_FREQ / ((low_period > high_period) ? high_period : low_period);
 }
 
-static void IRAM_ATTR gps_uartRxFifoReset() {
+static void gps_uartRxFifoReset() {
     uart_dev_t *uart = UART[GPS_UART];
     while (uart->status.rxfifo_cnt) {
         (volatile void) uart->fifo.rw_byte;
