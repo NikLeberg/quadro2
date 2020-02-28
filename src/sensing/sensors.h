@@ -12,17 +12,30 @@
  *                > Orientierung
  *                > uvm.
  *    HC-SR04:    - Abstand zum Boden per Ultraschall
- *    BN-220:     - GPS, GLONASS, BeiDou, SBAS, Galileo
+ *    BN-880Q:    - GPS, GLONASS, BeiDou, SBAS, Galileo
  * 
  * Alle Sensoren sind in ihrem eigenen Task implementiert.
  * Neue Sensordaten werden dem Sensor-Task mitgeteilt welcher den absoluten Status des Systems
  * aktualisiert, Sensor-Fusion betreibt und an registrierte Handler weiterleitet.
+ * 
+ * Systemstatus: (alle Werte im ENU Koordinatensystem)
+ *  - Orientierung
+ *  - geschätzte Position
+ *  - geschätzte Geschwindigkeit
  *
  * Höhe z:
- *  - lineare Beschleunigung (Worldframe) doppelt integriert über Zeit
+ *  - lineare z Beschleunigung (Worldframe) doppelt integriert über Zeit
  *  - Ultraschall
  *  - GPS Höhe über Meer tariert auf Startposition
  *  - Drucksensor tariert auf Startposition
+ * 
+ * Position y:
+ *  - lineare y Beschleunigung (Worldframe) doppelt integriert über Zeit
+ *  - GPS y-Positionskomponente
+ * 
+ * Position x:
+ *  - lineare x Beschleunigung (Worldframe) doppelt integriert über Zeit
+ *  - GPS x-Positionskomponente
  */
 
 
@@ -39,13 +52,27 @@
 
 #define SENSORS_TIMEOUT_MS                  2000
 
-// Sensorfehler, r = (Fehler / 2)**2
-#define SENSORS_FUSE_Z_ERROR_ACCELERATION   0.030625f   // +/- 0.35 m/s2
-#define SENSORS_FUSE_Z_ERROR_ULTRASONIC     0.00000625f // +/- 5 mm
-#define SENSORS_FUSE_Z_ERROR_BAROMETER      0.0225f     // +/- 30 cm
-#define SENSORS_FUSE_Z_ERROR_GPS            0.25f       // +/- 1 m
-// Limits
-#define SENSORS_FUSE_Z_X_VEL_LIMIT          100.0f      // +/- 100 m/s
+#define ERROR(value) (value / 2.0f) * (value / 2.0f)
+
+// Z Sensorfehler
+#define SENSORS_FUSE_Z_ERROR_ACCELERATION   ERROR(0.35f)    // +/- 0.35 m/s2
+#define SENSORS_FUSE_Z_ERROR_ULTRASONIC     ERROR(0.005f)   // +/- 5 mm
+#define SENSORS_FUSE_Z_ERROR_BAROMETER      ERROR(0.3f)     // +/- 30 cm
+#define SENSORS_FUSE_Z_ERROR_GPS            ERROR(1.0f)     // +/- 1 m
+// Z Limits
+#define SENSORS_FUSE_Z_LIMIT_VEL            100.0f          // +/- 100 m/s
+
+// Y Sensorfehler
+#define SENSORS_FUSE_Y_ERROR_ACCELERATION   ERROR(0.35f)    // +/- 0.35 m/s2
+#define SENSORS_FUSE_Y_ERROR_GPS            ERROR(0.5f)     // +/- 1 m
+// Y Limits
+#define SENSORS_FUSE_Y_LIMIT_VEL            100.0f          // +/- 100 m/s
+
+// X Sensorfehler
+#define SENSORS_FUSE_X_ERROR_ACCELERATION   ERROR(0.35f)    // +/- 0.35 m/s2
+#define SENSORS_FUSE_X_ERROR_GPS            ERROR(0.5f)     // +/- 1 m
+// X Limits
+#define SENSORS_FUSE_X_LIMIT_VEL            100.0f          // +/- 100 m/s
 
 
 /*
