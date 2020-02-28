@@ -201,10 +201,11 @@ void gps_task(void* arg) {
         uint8_t fixType = f[26];
         // uint8_t satNum = f[29];
         if (fixType == 0 || fixType == 5) continue; // noch kein Fix oder nur Zeit-Fix
-        // Position als x = Longitude / y = Latitude / z = Altitude
+        // Position als y = Longitude / x = Latitude / z = Altitude
+        // Laitüde - Quer / Logitude - oben nach unten
         forward.type = SENSORS_POSITION;
-        forward.vector.x = (int32_t) ((f[33] << 24) | (f[32] << 16) | (f[31] << 8) | (f[30])) * 1e-7; // °
-        forward.vector.y = (int32_t) ((f[37] << 24) | (f[36] << 16) | (f[35] << 8) | (f[34])) * 1e-7; // °
+        forward.vector.y = (int32_t) ((f[33] << 24) | (f[32] << 16) | (f[31] << 8) | (f[30])) * 1e-7; // °
+        forward.vector.x = (int32_t) ((f[37] << 24) | (f[36] << 16) | (f[35] << 8) | (f[34])) * 1e-7; // °
         forward.vector.z = (int32_t) ((f[45] << 24) | (f[44] << 16) | (f[43] << 8) | (f[42])) / 1e+3; // m
         float hAccuracy = (uint32_t) ((f[49] << 24) | (f[48] << 16) | (f[47] << 8) | (f[46])) / 1e+3;
         float vAccuracy = (uint32_t) ((f[53] << 24) | (f[52] << 16) | (f[51] << 8) | (f[50])) / 1e+3;
@@ -212,10 +213,10 @@ void gps_task(void* arg) {
         else forward.accuracy = vAccuracy;
         // Longitude & Latitude in Meter umrechnen
         // -> https://gis.stackexchange.com/questions/2951
-        forward.vector.x *= 111111.0f * cosf(forward.vector.y * M_PI / 180.0f);
-        forward.vector.y *= 111111.0f;
-        // Homepunkt anwenden (aber nur bei 3D-Fix & DOP < 5 m)
-        if (gps.setHome && fixType >= 3 && forward.accuracy <= 5.0f) {
+        forward.vector.y *= 111111.0f * cosf(forward.vector.x * M_PI / 180.0f);
+        forward.vector.x *= 111111.0f;
+        // Homepunkt anwenden (aber nur bei 3D-Fix & DOP < 2 m)
+        if (gps.setHome && fixType >= 3 && forward.accuracy <= 2.0f) {
             gps.home = forward.vector;
             forward.vector.x = 0.0f;
             forward.vector.y = 0.0f;
@@ -228,10 +229,11 @@ void gps_task(void* arg) {
         }
         xQueueSendToBack(xSensors_input, &forward, 0);
         // Geschwindigkeit
-        forward.type = SENSORS_GROUNDSPEED; // ToDo: xy-Zuordnung und Vorzeichen könnten noch falsch sein! (NED)
-        forward.vector.x = (int32_t) ((f[57] << 24) | (f[56] << 16) | (f[55] << 8) | (f[54])) / 1e+3;
-        forward.vector.y = (int32_t) ((f[61] << 24) | (f[60] << 16) | (f[59] << 8) | (f[58])) / 1e+3;
-        forward.vector.z = (int32_t) ((f[65] << 24) | (f[64] << 16) | (f[63] << 8) | (f[62])) / 1e+3;
+        forward.type = SENSORS_GROUNDSPEED; 
+        // Koordinatensystem wechseln: GPS ist im NED, quadro ist im ENU
+        forward.vector.y = (int32_t) ((f[57] << 24) | (f[56] << 16) | (f[55] << 8) | (f[54])) / 1e+3;
+        forward.vector.x = (int32_t) ((f[61] << 24) | (f[60] << 16) | (f[59] << 8) | (f[58])) / 1e+3;
+        forward.vector.z = -(int32_t) ((f[65] << 24) | (f[64] << 16) | (f[63] << 8) | (f[62])) / 1e+3;
         forward.accuracy = (uint32_t) ((f[77] << 24) | (f[76] << 16) | (f[75] << 8) | (f[74])) / 1e+3;
         xQueueSendToBack(xSensors_input, &forward, 0);
     }
