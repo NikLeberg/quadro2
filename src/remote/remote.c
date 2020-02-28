@@ -385,9 +385,13 @@ static esp_err_t remote_connectionEventHandler(void *ctx, system_event_t *event)
         }
         case SYSTEM_EVENT_STA_DISCONNECTED:
             // Verbindung wiederherstellen, wenn nicht absichtlich
-            if (event->event_info.disconnected.reason != WIFI_REASON_ASSOC_LEAVE
-            && event->event_info.disconnected.reason != WIFI_REASON_AUTH_FAIL) {
-                esp_wifi_stop();
+            switch(event->event_info.disconnected.reason) {
+                case (WIFI_REASON_AUTH_FAIL):
+                    #if (REMOTE_RESET_AFTER_STOP == 0)
+                        break;
+                    #endif
+                case (WIFI_REASON_ASSOC_LEAVE):
+                    esp_wifi_stop();
             }
             break;
         case SYSTEM_EVENT_STA_STOP:
