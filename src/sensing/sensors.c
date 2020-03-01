@@ -147,7 +147,7 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     // Kalman Filter Y initialisieren
     EEKF_CALLOC_MATRIX(sensors.Y.x, 2, 1); // 2 States: Position, Geschwindigkeit
     EEKF_CALLOC_MATRIX(sensors.Y.P, 2, 2);
-    EEKF_CALLOC_MATRIX(sensors.Y.z, 1, 1); // 1 Messung: GPS
+    EEKF_CALLOC_MATRIX(sensors.Y.z, 2, 1); // 1 Messung: GPS, GPS-Geschwindigkeit
     sensors_fuseY_reset();
     eekf_init(&sensors.Y.ekf, &sensors.Y.x, &sensors.Y.P, sensors_fuseY_transition, sensors_fuseY_measurement, NULL);
     // Kalman Filter X initialisieren
@@ -214,7 +214,7 @@ void sensors_task(void* arg) {
                 case (SENSORS_GROUNDSPEED): {
                     ESP_LOGI("sensors", "%llu,S,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.accuracy);
                     // sensors_fuseX(input.type, input.vector.x, input.timestamp);
-                    // sensors_fuseY(input.type, input.vector.y, input.timestamp);
+                    sensors_fuseY(input.type, input.vector.y, input.timestamp);
                     // sensors_fuseZ(input.type, input.vector.z, input.timestamp);
                     break;
                 }
@@ -401,13 +401,15 @@ static void sensors_fuseY(enum sensors_input_type_t type, float y, int64_t times
         }
     } else { // Korrigieren
         sensors.Y.ekf.userData = (void*) &type;
-        // Mssunsicherheit
-        EEKF_DECL_MAT_INIT(R, 1, 1, 0);
+        // Messunsicherheit
+        EEKF_DECL_MAT_INIT(R, 2, 2, 0);
         switch (type) {
             case (SENSORS_POSITION):
                 *EEKF_MAT_EL(sensors.Y.z, 0, 0) = y;
                 *EEKF_MAT_EL(R, 0, 0) = SENSORS_FUSE_Y_ERROR_GPS;
-            case (SENSORS_GROUNDSPEED): // ToDo?
+            case (SENSORS_GROUNDSPEED):
+                *EEKF_MAT_EL(sensors.Y.z, 1, 0) = y;
+                *EEKF_MAT_EL(R, 1, 1) = SENSORS_FUSE_Y_ERROR_VELOCITY;
             default:
                 return; // unbekannter Sensortyp
         }
@@ -419,7 +421,7 @@ static void sensors_fuseY(enum sensors_input_type_t type, float y, int64_t times
         }
     }
     // DEBUG
-    ESP_LOGD("sensors", "Fy,%f,%f,Z,%f", *EEKF_MAT_EL(sensors.Y.x, 0, 0), *EEKF_MAT_EL(sensors.Y.x, 1, 0), *EEKF_MAT_EL(sensors.Y.z, 0, 0));
+    ESP_LOGD("sensors", "Fy,%f,%f,Z,%f,%f", *EEKF_MAT_EL(sensors.Y.x, 0, 0), *EEKF_MAT_EL(sensors.Y.x, 1, 0), *EEKF_MAT_EL(sensors.Y.z, 0, 0), *EEKF_MAT_EL(sensors.Y.z, 1, 0));
 }
 
 eekf_return sensors_fuseY_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const *x,
@@ -453,8 +455,8 @@ eekf_return sensors_fuseY_measurement(eekf_mat* zp, eekf_mat* Jh, eekf_mat const
         case (SENSORS_POSITION):
             *EEKF_MAT_EL(*Jh, 0, 0) = 1.0f;
             break;
-        // case (SENSORS_GROUNDSPEED):
-        //     *EEKF_MAT_EL(*Jh, 0, 1) = 1.0f;
+        case (SENSORS_GROUNDSPEED):
+            *EEKF_MAT_EL(*Jh, 1, 1) = 1.0f;
         default:
             return eEekfReturnParameterError;
     }

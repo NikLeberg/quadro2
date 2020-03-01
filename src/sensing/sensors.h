@@ -65,6 +65,7 @@
 // Y Sensorfehler
 #define SENSORS_FUSE_Y_ERROR_ACCELERATION   ERROR(0.35f)    // +/- 0.35 m/s2
 #define SENSORS_FUSE_Y_ERROR_GPS            ERROR(0.5f)     // +/- 1 m
+#define SENSORS_FUSE_Y_ERROR_VELOCITY       ERROR(1.0f)     // +/- 1 m/s
 // Y Limits
 #define SENSORS_FUSE_Y_LIMIT_VEL            100.0f          // +/- 100 m/s
 
