@@ -157,8 +157,7 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     sensors_fuseX_reset();
     eekf_init(&sensors.X.ekf, &sensors.X.x, &sensors.X.P, sensors_fuseX_transition, sensors_fuseX_measurement, NULL);
     // installiere task
-    uint32_t otherCore = (xPortGetCoreID() == 0) ? 1 : 0;
-    if (xTaskCreatePinnedToCore(&sensors_task, "sensors", 3 * 1024, NULL, xSensors_PRIORITY, &xSensors_handle, otherCore) != pdTRUE) return true;
+    if (xTaskCreate(&sensors_task, "sensors", 3 * 1024, NULL, xSensors_PRIORITY, &xSensors_handle) != pdTRUE) return true;
     return ret;
 }
 
@@ -184,10 +183,10 @@ void sensors_task(void* arg) {
         if (xQueueReceive(xSensors_input, &input, 5000 / portTICK_PERIOD_MS) == pdTRUE) {
             switch (input.type) {
                 case (SENSORS_ACCELERATION): {
-                    // ESP_LOGI("sensors", "%llu,A,%f,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z, input.accuracy);
-                    sensors_fuseX(input.type, input.vector.x, input.timestamp);
-                    sensors_fuseY(input.type, input.vector.y, input.timestamp);
-                    sensors_fuseZ(input.type, input.vector.z, input.timestamp);
+                    ESP_LOGI("sensors", "%llu,A,%f,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z, input.accuracy);
+                    // sensors_fuseX(input.type, input.vector.x, input.timestamp);
+                    // sensors_fuseY(input.type, input.vector.y, input.timestamp);
+                    // sensors_fuseZ(input.type, input.vector.z, input.timestamp);
                     break;
                 }
                 case (SENSORS_ORIENTATION): {
@@ -196,25 +195,25 @@ void sensors_task(void* arg) {
                 }
                 case (SENSORS_ALTIMETER): {
                     // ESP_LOGI("sensors", "%llu,B,%f,%f", input.timestamp, input.distance, input.accuracy);
-                    sensors_fuseZ(input.type, input.distance, input.timestamp);
+                    // sensors_fuseZ(input.type, input.distance, input.timestamp);
                     break;
                 }
                 case (SENSORS_ULTRASONIC): {
                     // ESP_LOGI("sensors", "%llu,U,%f", input.timestamp, input.distance);
-                    sensors_fuseZ(input.type, input.distance, input.timestamp);
+                    // sensors_fuseZ(input.type, input.distance, input.timestamp);
                     break;
                 }
                 case (SENSORS_POSITION): {
                     ESP_LOGI("sensors", "%llu,P,%f,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z, input.accuracy);
-                    sensors_fuseX(input.type, input.vector.x, input.timestamp);
-                    sensors_fuseY(input.type, input.vector.y, input.timestamp);
-                    sensors_fuseZ(input.type, input.vector.z, input.timestamp);
+                    // sensors_fuseX(input.type, input.vector.x, input.timestamp);
+                    // sensors_fuseY(input.type, input.vector.y, input.timestamp);
+                    // sensors_fuseZ(input.type, input.vector.z, input.timestamp);
                     break;
                 }
                 case (SENSORS_GROUNDSPEED): {
                     ESP_LOGI("sensors", "%llu,S,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.accuracy);
                     // sensors_fuseX(input.type, input.vector.x, input.timestamp);
-                    sensors_fuseY(input.type, input.vector.y, input.timestamp);
+                    // sensors_fuseY(input.type, input.vector.y, input.timestamp);
                     // sensors_fuseZ(input.type, input.vector.z, input.timestamp);
                     break;
                 }
@@ -226,7 +225,7 @@ void sensors_task(void* arg) {
                 xQueueReset(xSensors_input);
                 ESP_LOGE("sensors", "queue reset!");
             }
-            // Timeouterkennung
+            // Timeouterkennung sh2_reinitialize(void); ?
             sensors.timeouts[input.type] = input.timestamp;
             input.timestamp = input.timestamp - (SENSORS_TIMEOUT_MS * 1000);
             for (uint8_t i = 0; i < SENSORS_POSITION; ++i) { // ignoriere vorerst GPS

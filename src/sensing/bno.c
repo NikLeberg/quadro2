@@ -146,8 +146,8 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin) {
     gpio_config(&gpioConfig); // Interruptpin
     gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
     if (gpio_isr_handler_add(interruptPin, &bno_interrupt, NULL)) return true;
-    // Task starten, pinned da Interrupt an CPU gebunden ist.
-    if (xTaskCreatePinnedToCore(&bno_task, "bno", 3 * 1024, NULL, xSensors_PRIORITY + 1, &xBno_handle, xPortGetCoreID()) != pdTRUE) return true;
+    // Task starten
+    if (xTaskCreate(&bno_task, "bno", 3 * 1024, NULL, xSensors_PRIORITY - 1, &xBno_handle) != pdTRUE) return true;
     // SensorHub-2 Bibliothek starten
     SemaphoreHandle_t sInitDone = xSemaphoreCreateBinary();
     if (sh2_initialize(&bno_initDone, sInitDone)) return true;
@@ -169,7 +169,6 @@ void bno_task(void* arg) {
     // Loop
     while (true) {
         if (xQueueReceive(xBno_input, &input, (BNO_DATA_RATE_IMU_US / 1000 / portTICK_PERIOD_MS) + 1) == pdTRUE) {
-            timeoutCount = 0;
             switch (input.type) {
                 case (BNO_INPUT_INTERRUPT): {
                     // ist sh2-Lib registriert?
@@ -193,6 +192,7 @@ void bno_task(void* arg) {
                     break;
                 }
             }
+            timeoutCount = 0;
         } else { // vermutlich ein Interrupt verpasst, prüfe
             if (gpio_get_level(bno.interruptPin) == 0 || ++timeoutCount > 10) {
                 struct bno_input_t input;
@@ -282,7 +282,7 @@ static void bno_sensorEvent(void * cookie, sh2_SensorEvent_t *event) {
             break;
         case (SH2_PRESSURE): // Druck in Meter über Meer umrechnen
             forward.type = SENSORS_ALTIMETER;
-            forward.distance = (228.15 / 0.0065) * (1 - powf(value.un.pressure.value / 1013.25, (1 / 5.255)));
+            forward.distance = (228.15f / 0.0065f) * (1.0f - powf(value.un.pressure.value / 1013.25f, (1.0f / 5.255f)));
             forward.accuracy = value.status & 0b00000011;
             // Homepunkt anwenden
             if (bno.setHome) {
@@ -332,9 +332,9 @@ int sh2_hal_reset(bool dfuMode, sh2_rxCallback_t *onRx, void *cookie) {
     bno.onRx = onRx;
     // Sensor-Reset
     gpio_set_level(bno.resetPin, 0);
-    vTaskDelay(10 / portTICK_RATE_MS);
-    gpio_set_level(bno.resetPin, 1);
     vTaskDelay(100 / portTICK_RATE_MS);
+    gpio_set_level(bno.resetPin, 1);
+    vTaskDelay(200 / portTICK_RATE_MS);
     return false;
 }
 

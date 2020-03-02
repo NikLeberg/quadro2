@@ -176,8 +176,8 @@ bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
     // UBX-CFG-RATE: Daten-Rate setzen
     uint8_t msgRate[] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, (0xff & GPS_DATA_RATE_MS), (GPS_DATA_RATE_MS >> 8), 0x01, 0x00, 0x00, 0x00, NULL, NULL};
     if (gps_sendUBX(msgRate, sizeof(msgRate), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
-    // Task starten, pinned da UART Interrupt an CPU gebunden ist.
-    if (xTaskCreatePinnedToCore(&gps_task, "gps", 3 * 1024, NULL, xSensors_PRIORITY + 1, &xGps_handle, xPortGetCoreID()) != pdTRUE) return true;
+    // Task starten
+    if (xTaskCreate(&gps_task, "gps", 3 * 1024, NULL, xSensors_PRIORITY - 1, &xGps_handle) != pdTRUE) return true;
     return false;
 }
 
@@ -188,7 +188,7 @@ void gps_setHome() {
 
 void gps_task(void* arg) {
     // Variablen
-    struct gps_input_t input;
+    struct gps_input_t input = {NULL, 0, 0};
     struct sensors_input_t forward;
     // UBX-NAV-PVT Frames parsen
     while (true) {
@@ -210,21 +210,19 @@ void gps_task(void* arg) {
         // uint8_t satNum = f[29];
         if (fixType == 0 || fixType == 5) continue; // noch kein Fix oder nur Zeit-Fix
         // Position als y = Longitude / x = Latitude / z = Altitude
-        // Laitüde - Quer / Logitude - oben nach unten
+        // Laitude - Quer / Logitude - oben nach unten
         forward.type = SENSORS_POSITION;
         forward.vector.y = (int32_t) ((f[33] << 24) | (f[32] << 16) | (f[31] << 8) | (f[30])) * 1e-7; // °
         forward.vector.x = (int32_t) ((f[37] << 24) | (f[36] << 16) | (f[35] << 8) | (f[34])) * 1e-7; // °
         forward.vector.z = (int32_t) ((f[45] << 24) | (f[44] << 16) | (f[43] << 8) | (f[42])) / 1e+3; // m
-        float hAccuracy = (uint32_t) ((f[49] << 24) | (f[48] << 16) | (f[47] << 8) | (f[46])) / 1e+3;
-        float vAccuracy = (uint32_t) ((f[53] << 24) | (f[52] << 16) | (f[51] << 8) | (f[50])) / 1e+3;
-        if (hAccuracy > vAccuracy) forward.accuracy = hAccuracy;
-        else forward.accuracy = vAccuracy;
+        forward.accuracy = (uint32_t) ((f[49] << 24) | (f[48] << 16) | (f[47] << 8) | (f[46])) / 1e+3;
+        // float vAccuracy = (uint32_t) ((f[53] << 24) | (f[52] << 16) | (f[51] << 8) | (f[50])) / 1e+3;
         // Longitude & Latitude in Meter umrechnen
         // -> https://gis.stackexchange.com/questions/2951
         forward.vector.y *= 111111.0f * cosf(forward.vector.x * M_PI / 180.0f);
         forward.vector.x *= 111111.0f;
-        // Homepunkt anwenden (aber nur bei 3D-Fix & DOP < 2 m)
-        if (gps.setHome && fixType >= 3 && forward.accuracy <= 2.0f) {
+        // Homepunkt anwenden (aber nur bei 3D-Fix & benötigtem DOP)
+        if (gps.setHome && fixType >= 3 && forward.accuracy <= GPS_SET_HOME_MIN_DOP) {
             gps.home = forward.vector;
             forward.vector.x = 0.0f;
             forward.vector.y = 0.0f;

@@ -19,8 +19,9 @@
 
 /** Einstellungen **/
 
-#define GPS_UART            UART_NUM_1
-#define GPS_DATA_RATE_MS    1000 // 1 Hz
+#define GPS_UART                UART_NUM_1
+#define GPS_DATA_RATE_MS        1000 // 1 Hz
+#define GPS_SET_HOME_MIN_DOP    10.0f // 10 m
 
 
 /*

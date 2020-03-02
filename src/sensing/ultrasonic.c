@@ -100,7 +100,7 @@ bool ult_init(gpio_num_t triggerPin, gpio_num_t echoPin) {
     if (xQueueReceive(xUlt_input, &dummy, 40 / portTICK_PERIOD_MS) != pdTRUE) return true;
     gpio_set_level(ult.triggerPin, 1);
     // Task starten
-    if (xTaskCreatePinnedToCore(&ult_task, "ult", 1 * 1024, NULL, xSensors_PRIORITY + 1, &xUlt_handle, xPortGetCoreID()) != pdTRUE) return true;
+    if (xTaskCreate(&ult_task, "ult", 1 * 1024, NULL, xSensors_PRIORITY - 1, &xUlt_handle) != pdTRUE) return true;
     return false;
 }
 

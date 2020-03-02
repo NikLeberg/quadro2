@@ -41,7 +41,7 @@ QueueHandle_t xBno_input;
 
 // Remote
 TaskHandle_t xRemote_handle;
-#define xRemote_PRIORITY (6U)
+#define xRemote_PRIORITY (5U)
 QueueHandle_t xRemote_input;
 
 // Info
