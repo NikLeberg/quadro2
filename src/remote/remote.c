@@ -450,7 +450,9 @@ static void remote_sendMessage(struct remote_input_message_t *message) {
         if (message->ws) { // spezifischer WS
             cgiWebsocketSend(&remote.httpd.httpdInstance, message->ws, message->data, message->length, WEBSOCK_FLAG_NONE);
         } else if (remote.ws) { // letzter WS
-            cgiWebsocketSend(&remote.httpd.httpdInstance, remote.ws, message->data, message->length, WEBSOCK_FLAG_NONE);
+            if (cgiWebsocketSend(&remote.httpd.httpdInstance, remote.ws, message->data, message->length, WEBSOCK_FLAG_NONE) <= 0) {
+                remote.ws = NULL; // Sendefehler, Websocket inaktiv setzen
+            }
         }
     }
 }
