@@ -77,10 +77,9 @@ void gps_task(void* arg);
 /*
  * Function: gps_sendUBX
  * ----------------------------
- * Haupttask. Wartet auf Frames die per ISR empfangen wurden, verarbeitet die Rohdaten
- * und leitet diese an sensors-Queue weiter.
+ * Sende ein vorbereitetes UBX-Frame an das GPS
  *
- * uint8_t *buffer: Pointer zur Nachricht, ckA und ckB können NULL sein -> werden berechnet
+ * uint8_t *buffer: Pointer zur Nachricht, ckA und ckB können NULL sein -> werden dann berechnet
  * uint8_t length: gesamtlänge der Nachricht (Header & Payload)
  * bool aknowledge: false -> nur senden, true -> warte auf positive Bestätigung
  * TickType_t timeout: maximale Blockzeit
@@ -173,6 +172,17 @@ bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                         0x00, 0x00, 0x56, 0xD6};
     if (gps_sendUBX(msgNav, sizeof(msgNav), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
+    // UBX-CFG-GNSS: Aktiviere Galileo, deaktiviere QZSS
+    uint8_t msgGNSS[] = {0xB5, 0x62, 0x06, 0x3e, 0x3c, 0x00, 0x00, 0x20, 0xFF, 0x07, // 32 aktivierte Kanäle
+                         0x00, 0x08, 0x10, 0x00, 0x01, 0x00, 0x01, 0x01, // GPS mit min 8 max 16 Kanäle Aktiviert
+                         0x01, 0x01, 0x03, 0x00, 0x01, 0x00, 0x01, 0x01, // SBAS mit min 0 max 3 Kanäle Aktiviert
+                         0x02, 0x08, 0x0a, 0x00, 0x01, 0x00, 0x01, 0x01, // Galileo mit min 8 max 10 Kanäle Aktiviert
+                         0x03, 0x08, 0x10, 0x00, 0x00, 0x00, 0x01, 0x01, // BeiDou Deaktiviert
+                         0x04, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x03, // IMAS Deaktiviert
+                         0x05, 0x00, 0x03, 0x00, 0x00, 0x00, 0x01, 0x05, // QZSS Deaktiviert
+                         0x06, 0x08, 0x0e, 0x00, 0x01, 0x00, 0x01, 0x01, // GOLONASS mit min 8 max 14 Kanäle Aktiviert
+                         NULL, NULL};
+    if (gps_sendUBX(msgGNSS, sizeof(msgGNSS), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
     // UBX-CFG-RATE: Daten-Rate setzen
     uint8_t msgRate[] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, (0xff & GPS_DATA_RATE_MS), (GPS_DATA_RATE_MS >> 8), 0x01, 0x00, 0x00, 0x00, NULL, NULL};
     if (gps_sendUBX(msgRate, sizeof(msgRate), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
@@ -215,8 +225,8 @@ void gps_task(void* arg) {
         forward.vector.y = (int32_t) ((f[33] << 24) | (f[32] << 16) | (f[31] << 8) | (f[30])) * 1e-7; // °
         forward.vector.x = (int32_t) ((f[37] << 24) | (f[36] << 16) | (f[35] << 8) | (f[34])) * 1e-7; // °
         forward.vector.z = (int32_t) ((f[45] << 24) | (f[44] << 16) | (f[43] << 8) | (f[42])) / 1e+3; // m
-        forward.accuracy = (uint32_t) ((f[49] << 24) | (f[48] << 16) | (f[47] << 8) | (f[46])) / 1e+3;
-        // float vAccuracy = (uint32_t) ((f[53] << 24) | (f[52] << 16) | (f[51] << 8) | (f[50])) / 1e+3;
+        forward.accuracy = (uint32_t) ((f[49] << 24) | (f[48] << 16) | (f[47] << 8) | (f[46])) / 1e+3; // HDOP
+        // float vAccuracy = (uint32_t) ((f[53] << 24) | (f[52] << 16) | (f[51] << 8) | (f[50])) / 1e+3; // VDOP
         // Longitude & Latitude in Meter umrechnen
         // -> https://gis.stackexchange.com/questions/2951
         forward.vector.y *= 111111.0f * cosf(forward.vector.x * M_PI / 180.0f);
@@ -297,6 +307,7 @@ static void gps_interrupt(void* arg) {
         uint16_t frameSize = 0, payloadSize = 0; // erwartete Länge
         uint8_t framePos = 0, class = 0x00, id = 0x00, *frame = NULL, ckA = 0, ckB = 0;
         while (uart->status.rxfifo_cnt) {
+            if (frameSize && framePos >= frameSize) break; // Frame komplett
             uint8_t c = uart->fifo.rw_byte;
             switch (framePos) {
                 case (0): { // Sync 1
