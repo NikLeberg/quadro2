@@ -161,9 +161,6 @@ bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
     uint8_t msgPower[] = {0xB5, 0x62, 0x06, 0x86, 0x08, 0x00, 0x00, 0x00,
                           0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x94, 0x5A};
     if (gps_sendUBX(msgPower, sizeof(msgPower), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
-    // UBX-CFG-MSG: Zu empfangende Nachrichten setzen, UBX-NAV-PVT (0x01 0x07)
-    uint8_t msgMessages[] = {0xB5, 0x62, 0x06, 0x01, 0x03, 0x00, 0x01, 0x07, 0x01, 0x13, 0x51};
-    if (gps_sendUBX(msgMessages, sizeof(msgMessages), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
     // UBX-CFG-NAV5: Navigationsmodus auf Airborne <2g setzen
     uint8_t msgNav[] = {0xB5, 0x62, 0x06, 0x24, 0x24, 0x00, 0x01, 0x00,
                         0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -183,8 +180,12 @@ bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
                          0x06, 0x08, 0x0e, 0x00, 0x01, 0x00, 0x01, 0x01, // GOLONASS mit min 8 max 14 Kanäle Aktiviert
                          NULL, NULL};
     if (gps_sendUBX(msgGNSS, sizeof(msgGNSS), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
+    // UBX-CFG-MSG: Zu empfangende Nachrichten setzen, UBX-NAV-PVT (0x01 0x07)
+    uint8_t msgMessages[] = {0xB5, 0x62, 0x06, 0x01, 0x03, 0x00, 0x01, 0x07, 0x01, 0x13, 0x51};
+    if (gps_sendUBX(msgMessages, sizeof(msgMessages), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
     // UBX-CFG-RATE: Daten-Rate setzen
-    uint8_t msgRate[] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, (0xff & GPS_DATA_RATE_MS), (GPS_DATA_RATE_MS >> 8), 0x01, 0x00, 0x00, 0x00, NULL, NULL};
+    uint8_t msgRate[] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, (0xff & GPS_DATA_RATE_MS),
+                        (GPS_DATA_RATE_MS >> 8), 0x01, 0x00, 0x00, 0x00, NULL, NULL};
     if (gps_sendUBX(msgRate, sizeof(msgRate), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
     // Task starten
     if (xTaskCreate(&gps_task, "gps", 3 * 1024, NULL, xSensors_PRIORITY - 1, &xGps_handle) != pdTRUE) return true;
