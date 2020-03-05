@@ -5,8 +5,28 @@
  * Date:   2020-02-04
  * ----------------------------
  * Standartisierte Schnittstellen zwischen den Modulen.
+ * Jedes Modul hat eine Queue des Typs event_t welches von Verschiedenen Quellen mit
+ * Events gefüllt werden kann:
  * 
- * Befehle / Parameter / Einstellungen
+ * COMMAND:
+ *  - Befehl ausführen
+ * 
+ * SETTING:
+ *  - kein wirklicher Input, sondern der Wert wird direkt geändert
+ *  - permanente Einstellungen
+ * 
+ * PARAMETER:
+ *  - kein wirklicher Input, sondern der Wert wird direkt geändert
+ *  - nicht permanenter Wert
+ * 
+ * PV:
+ *  - Prozessvariable
+ *  - Task bietet Variablen an
+ *  - Task der die Werte aktualisiert informiert hiermit registrierte andere Tasks
+ * 
+ * INTERNAL:
+ *  - für Taskinterne Events
+ * 
  */
 
 
@@ -20,15 +40,18 @@
 
 /** Variablendeklaration **/
 
-typedef uint32_t event_type_t;
+typedef enum {
+    EVENT_COMMAND = 0,
+    EVENT_SETTING,
+    EVENT_PARAMETER,
+    EVENT_PV,
+    EVENT_INTERNAL
+} event_type_t;
 
 typedef struct {
     event_type_t type;
     void *data;
 } event_t;
-
-#define EVENT_COMMAND       0
-#define EVENT_PARAMETER     1
 
 
 /*
