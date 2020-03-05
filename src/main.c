@@ -1,62 +1,31 @@
+/*
+ * File: main.c
+ * ----------------------------
+ * Author: Niklaus Leuenberger
+ * Date:   2020-03-05
+ * ----------------------------
+ * Startup aller Module
+ */
 
 /*
-    Hardware -> Software -> Hardware
-
-    Sensorik -+
-    Commands -+-> Software -> Motorregler -> Hardware
-
-    Events:
-     - neue Sensordaten
-     - Steuerbefehle
-
-    Software läuft
-    - neue Sensordaten
-    - 
-    Orientierung
-    Lineare Beschleunigung
-    GPS
-    Ultraschall
-    Altimeter
-
-
     Module:
-    - Inputs
-        <-> Sensoren
-        <-- Datenverarbeitung
-    - Commander
-        <-- Manuelle Steuerbefehle
-        <-- Automatische Steuerbefehle
-        --> Statusanzeige / Kontrolle
-        <-> Konfiguration
-    - Controler
-        --> Motorregelung
-    - Outputs
-        --> Motoransteuerung
-
-    Offene Fragen:
-    - Ist Outputs als Modul qualifiziert oder Teil vom Controler?
-    - Wie werden die Module konfiguriert resp. entsprechend aktualisiert?
-    - Wie kommunizieren die Module untereinander?
-        --> Module bieten alle ähnliches Interface, ein Linkermodul verlinkt alles
+    - Sensors
+        - BNO
+        - Ultrschall
+        - GPS
+    - Remote
+        - Smartphone
+        - Website
+            - Konfiguration
+            - Befehle / Aktionen
+    - Fly
+        - Motorregelung & -ansteuerung
+    - Info
+        - Statusanzeige
 
     Erzwungener Systemtakt von 20ms / 50 Hz durch PWM-Ansteuerung der ESCs?
     alter BNO hatte 100 Hz Updaterate
     neuer hat 400 Hz! <3
-
-    Jedes Modul ist ein Prozess
-    - Konfig wird geparst als Singleton, global erreichbar
-    - bei Konfig Änderungen wird ein bit gesetzt zu welchem alle module bestätigen müssen und ihre internen einstellungen aktualisieren
-    Nein:
-    - bei Änderungen wird configUpdate(class Config c, time_t t) - Funktion des Moduls (übernommen aus Basis-Klasse) vom Loop aufgerufen
-    - jede Variable ist ein Scruct {type_t variablentyp, var_t variable, bool wasUpdated}
-    - wird eine Variable von Extern geändert wird wasUpdated auf 1 gesetzt.
-
-    Oder :
-    1 - Config-Singleton wird verändert
-    2 - Laufendes Modul / Prozess wird aufgefordert alle laufenden Prozesse abzuschliessen
-    3 - Währenddem wird neues Modul mit neuen Einstellungen instanziert (aber im Pre-Run Modus gehalten)
-    4 - Altes Modul wird gestoppt, neues gestartet.
-    5 - Altes Modul entsorgen
 
     // Pinout
     https://cdn.instructables.com/FOL/YWLI/JEOILQ5U/FOLYWLIJEOILQ5U.LARGE.jpg?auto=webp&frame=1&width=1024&fit=bounds
@@ -72,7 +41,6 @@
 #include "esp_log.h"
 
 /** Interne Abhängigkeiten **/
-#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 #include "./sensing/sensors.h"
 #include "./remote/remote.h"
 #include "./info/info.h"
@@ -90,7 +58,7 @@
 
 
 
-void app_main(void* arg){
+void app_main(void* arg) {
     // Setup
     esp_log_level_set("*", ESP_LOG_VERBOSE);
     ESP_LOGI("quadro2", "Version: %s - %s", __DATE__, __TIME__);
@@ -115,7 +83,7 @@ void app_main(void* arg){
 
     // Main Loop
     while (true) {
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        vTaskDelay(10000 / portTICK_PERIOD_MS);
         sensors_setHome();
         vTaskDelay(portMAX_DELAY);
     }

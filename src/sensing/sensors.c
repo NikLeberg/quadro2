@@ -52,6 +52,7 @@
 
 /** Interne Abhängigkeiten **/
 
+#include "intercom.h"
 #include "resources.h"
 #include "i2c.h"
 #include "bno.h"
@@ -70,21 +71,51 @@ struct sensors_t {
         eekf_context ekf;
         eekf_mat x, P, z;
         int64_t lastTimestamp;
+        eekf_value errorAcceleration, errorUltrasonic, errorBarometer, errorGPS;
+        eekf_value limitVelocity;
     } Z;
 
     struct { // Fusion der Y Achse (Latitude)
         eekf_context ekf;
         eekf_mat x, P, z;
         int64_t lastTimestamp;
+        eekf_value errorAcceleration, errorGPS, errorVelocity;
+        eekf_value limitVelocity;
     } Y;
 
     struct { // Fusion der X Achse (Longitude)
         eekf_context ekf;
         eekf_mat x, P, z;
         int64_t lastTimestamp;
+        eekf_value errorAcceleration, errorGPS, errorVelocity;
+        eekf_value limitVelocity;
     } X;
 };
 static struct sensors_t sensors;
+
+static command_t sensors_commands[SENSORS_COMMAND_MAX] = {
+    COMMAND("setHome"),
+    COMMAND("setAltimeterToGPS"),
+    COMMAND("resetFusion")
+};
+
+static setting_t sensor_settings[SENSORS_SETTING_MAX] = {
+    SETTING("fuseZ_errorAcceleration",  &sensors.Z.errorAcceleration,   SETTING_TYPE_FLOAT),
+    SETTING("fuseZ_errorUltrasonic",    &sensors.Z.errorUltrasonic,     SETTING_TYPE_FLOAT),
+    SETTING("fuseZ_errorBarometer",     &sensors.Z.errorBarometer,      SETTING_TYPE_FLOAT),
+    SETTING("fuseZ_errorGPS",           &sensors.Z.errorGPS,            SETTING_TYPE_FLOAT),
+    SETTING("fuseZ_limitVelocity",      &sensors.Z.limitVelocity,       SETTING_TYPE_FLOAT),
+
+    SETTING("fuseY_errorAcceleration",  &sensors.Y.errorAcceleration,   SETTING_TYPE_FLOAT),
+    SETTING("fuseY_errorGPS",           &sensors.Y.errorGPS,            SETTING_TYPE_FLOAT),
+    SETTING("fuseY_errorVelocity",      &sensors.Y.errorVelocity,       SETTING_TYPE_FLOAT),
+    SETTING("fuseY_limitVelocity",      &sensors.Y.limitVelocity,       SETTING_TYPE_FLOAT),
+    
+    SETTING("fuseX_errorAcceleration",  &sensors.X.errorAcceleration,   SETTING_TYPE_FLOAT),
+    SETTING("fuseX_errorGPS",           &sensors.X.errorGPS,            SETTING_TYPE_FLOAT),
+    SETTING("fuseX_errorVelocity",      &sensors.X.errorVelocity,       SETTING_TYPE_FLOAT),
+    SETTING("fuseX_limitVelocity",      &sensors.X.limitVelocity,       SETTING_TYPE_FLOAT)
+};
 
 
 /** Private Functions **/
