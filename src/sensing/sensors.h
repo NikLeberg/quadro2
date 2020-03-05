@@ -48,7 +48,7 @@
 #include "driver/gpio.h"
 
 
-/** Einstellungen **/
+/** Compiler Einstellungen **/
 
 #define SENSORS_TIMEOUT_MS                  2000
 
@@ -74,6 +74,39 @@
 #define SENSORS_FUSE_X_ERROR_GPS            ERROR(0.5f)     // +/- 1 m
 // X Limits
 #define SENSORS_FUSE_X_LIMIT_VEL            100.0f          // +/- 100 m/s
+
+
+/** Befehle **/
+
+typedef enum {
+    SENSORS_COMMAND_SET_HOME = 0,
+    SENSORS_COMMAND_SET_ALTIMETER_TO_GPS,
+    SENSORS_COMMAND_RESET_FUSION,
+    SENSORS_COMMAND_MAX
+} sensors_command_t;
+
+
+/** Einstellungen **/
+
+typedef enum {
+    // Fuse Z
+    SENSORS_SETTING_FUSE_Z_ERROR_ACCELERATION = 0,
+    SENSORS_SETTING_FUSE_Z_ERROR_ULTRASONIC,
+    SENSORS_SETTING_FUSE_Z_ERROR_BAROMETER,
+    SENSORS_SETTING_FUSE_Z_ERROR_GPS,
+    SENSORS_SETTING_FUSE_Z_LIMIT_VEL,
+    // Fuse Y
+    SENSORS_SETTING_FUSE_Y_ERROR_ACCELERATION,
+    SENSORS_SETTING_FUSE_Y_ERROR_GPS,
+    SENSORS_SETTING_FUSE_Y_ERROR_VELOCITY,
+    SENSORS_SETTING_FUSE_Y_LIMIT_VEL,
+    // Fuse X
+    SENSORS_SETTING_FUSE_X_ERROR_ACCELERATION,
+    SENSORS_SETTING_FUSE_X_ERROR_GPS,
+    SENSORS_SETTING_FUSE_X_ERROR_VELOCITY,
+    SENSORS_SETTING_FUSE_X_LIMIT_VEL,
+    SENSORS_SETTING_MAX
+} sensors_setting_t;
 
 
 /*
