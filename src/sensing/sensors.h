@@ -109,6 +109,19 @@ typedef enum {
 } sensors_setting_t;
 
 
+/** Parameter **/
+
+
+/** Prozessvariablen **/
+
+typedef enum {
+    SENSORS_PV_X = 0,
+    SENSORS_PV_Y,
+    SENSORS_PV_Z,
+    SENSORS_PV_MAX
+} sensors_pv_t;
+
+
 /*
  * Function: sensors_init
  * ----------------------------

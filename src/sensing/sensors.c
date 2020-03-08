@@ -99,23 +99,30 @@ static command_t sensors_commands[SENSORS_COMMAND_MAX] = {
     COMMAND("resetFusion")
 };
 
-static setting_t sensor_settings[SENSORS_SETTING_MAX] = {
-    SETTING("fuseZ_errorAcceleration",  &sensors.Z.errorAcceleration,   SETTING_TYPE_FLOAT),
-    SETTING("fuseZ_errorUltrasonic",    &sensors.Z.errorUltrasonic,     SETTING_TYPE_FLOAT),
-    SETTING("fuseZ_errorBarometer",     &sensors.Z.errorBarometer,      SETTING_TYPE_FLOAT),
-    SETTING("fuseZ_errorGPS",           &sensors.Z.errorGPS,            SETTING_TYPE_FLOAT),
-    SETTING("fuseZ_limitVelocity",      &sensors.Z.limitVelocity,       SETTING_TYPE_FLOAT),
+static setting_t sensors_settings[SENSORS_SETTING_MAX] = {
+    SETTING("fuseZ_errorAcceleration",  &sensors.Z.errorAcceleration,   VALUE_TYPE_FLOAT),
+    SETTING("fuseZ_errorUltrasonic",    &sensors.Z.errorUltrasonic,     VALUE_TYPE_FLOAT),
+    SETTING("fuseZ_errorBarometer",     &sensors.Z.errorBarometer,      VALUE_TYPE_FLOAT),
+    SETTING("fuseZ_errorGPS",           &sensors.Z.errorGPS,            VALUE_TYPE_FLOAT),
+    SETTING("fuseZ_limitVelocity",      &sensors.Z.limitVelocity,       VALUE_TYPE_FLOAT),
 
-    SETTING("fuseY_errorAcceleration",  &sensors.Y.errorAcceleration,   SETTING_TYPE_FLOAT),
-    SETTING("fuseY_errorGPS",           &sensors.Y.errorGPS,            SETTING_TYPE_FLOAT),
-    SETTING("fuseY_errorVelocity",      &sensors.Y.errorVelocity,       SETTING_TYPE_FLOAT),
-    SETTING("fuseY_limitVelocity",      &sensors.Y.limitVelocity,       SETTING_TYPE_FLOAT),
+    SETTING("fuseY_errorAcceleration",  &sensors.Y.errorAcceleration,   VALUE_TYPE_FLOAT),
+    SETTING("fuseY_errorGPS",           &sensors.Y.errorGPS,            VALUE_TYPE_FLOAT),
+    SETTING("fuseY_errorVelocity",      &sensors.Y.errorVelocity,       VALUE_TYPE_FLOAT),
+    SETTING("fuseY_limitVelocity",      &sensors.Y.limitVelocity,       VALUE_TYPE_FLOAT),
     
-    SETTING("fuseX_errorAcceleration",  &sensors.X.errorAcceleration,   SETTING_TYPE_FLOAT),
-    SETTING("fuseX_errorGPS",           &sensors.X.errorGPS,            SETTING_TYPE_FLOAT),
-    SETTING("fuseX_errorVelocity",      &sensors.X.errorVelocity,       SETTING_TYPE_FLOAT),
-    SETTING("fuseX_limitVelocity",      &sensors.X.limitVelocity,       SETTING_TYPE_FLOAT)
+    SETTING("fuseX_errorAcceleration",  &sensors.X.errorAcceleration,   VALUE_TYPE_FLOAT),
+    SETTING("fuseX_errorGPS",           &sensors.X.errorGPS,            VALUE_TYPE_FLOAT),
+    SETTING("fuseX_errorVelocity",      &sensors.X.errorVelocity,       VALUE_TYPE_FLOAT),
+    SETTING("fuseX_limitVelocity",      &sensors.X.limitVelocity,       VALUE_TYPE_FLOAT)
 };
+
+static pv_t sensors_pvs[SENSORS_PV_MAX] = {
+    PV("x", VALUE_TYPE_FLOAT),
+    PV("y", VALUE_TYPE_FLOAT),
+    PV("z", VALUE_TYPE_FLOAT),
+};
+PVLIST("sensors", sensors_pvs);
 
 
 /** Private Functions **/
@@ -152,6 +159,8 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
                   gpio_num_t gpsRxPin, gpio_num_t gpsTxPin) {                       // GPS
     // Input-Queue erstellen
     xSensors_input = xQueueCreate(16, sizeof(struct sensors_input_t));
+    // an Intercom anbinden
+    pvRegister(xSensors_input, sensors_pvs);
     // I2C initialisieren
     bool ret = false;
     ESP_LOGD("sensors", "I2C init");

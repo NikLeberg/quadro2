@@ -23,6 +23,8 @@
  *  - Prozessvariable
  *  - Task bietet Variablen an
  *  - Task der die Werte aktualisiert informiert hiermit registrierte andere Tasks
+ *  - sozusagen Publish / Subscribe Funktionalität
+ *  - reine Events per VALUE_TYPE_NONE übermittelbar
  * 
  * INTERNAL:
  *  - für Taskinterne Events
@@ -52,6 +54,13 @@ typedef struct {
     event_type_t type;
     void *data;
 } event_t;
+
+typedef enum {
+    VALUE_TYPE_NONE,
+    VALUE_TYPE_UINT,
+    VALUE_TYPE_INT,
+    VALUE_TYPE_FLOAT
+} value_type_t;
 
 
 /*
@@ -91,18 +100,80 @@ typedef struct {
  * Extern ansprechbar per String.
  */
 
-typedef enum {
-    SETTING_TYPE_UINT,
-    SETTING_TYPE_INT,
-    SETTING_TYPE_FLOAT
-} setting_type_t;
-
 typedef struct {
 	const char *name;
     void *address;
-    setting_type_t type;
+    value_type_t type;
 } setting_t;
 
 #define SETTING(name, address, type)  {(name), (void *)(address), (type)}
 
-// ToDo: LinkedList in dem die Arrays mit Taskverknüpfungen registriert werden
+
+/*
+ * Types: Parameter
+ * ----------------------------
+ * Variabeltypen zur Definition von Parametern im Sinne von:
+ * 
+ * // static parameter_t sensors_parameters[SENSORS_PARAMETERS_MAX] = {
+ * //     PARAMETER("fuseZ_errorAcceleration", &test, PARAMETER_TYPE_FLOAT),
+ * //     ...
+ * // }
+ * 
+ * Intern ansprechbar per Enumerator resp. parameter_t[x].
+ * Extern ansprechbar per String.
+ */
+
+typedef struct {
+	const char *name;
+    void *address;
+    value_type_t type;
+} parameter_t;
+
+#define PARAMETER(name, address, type)  {(name), (void *)(address), (type)}
+
+
+/*
+ * Types: Prozessvariabel
+ * ----------------------------
+ * Variabeltypen zur Definition von Pvs
+ * 
+ * Intern ansprechbar per Enumerator resp. pv_t[x].
+ * Extern ansprechbar per String.
+ */
+
+#define INTERCOM_PV_MAX_SUBSCRIBERS 3
+
+typedef struct {
+	const char *name;
+    value_type_t type;
+    QueueHandle_t subscribers[INTERCOM_PV_MAX_SUBSCRIBERS];
+} pv_t;
+
+#define PV(name, type)  {(name), (type), {NULL}}
+
+typedef struct pv_list_s {
+    const char *task;
+    QueueHandle_t publisher;
+    pv_t *pvs;
+    struct pv_list_s *next;
+} pv_list_t;
+
+#define PVLIST(task, pvs)   pv_list_t pvs##_list = {task, NULL, pvs, NULL};
+
+#define pvRegister(queue, pvs)  intercom_pvRegister(queue, &(pvs##_list))
+
+
+/** To be made Private **/
+
+static struct {
+    pv_list_t *pvHead;
+} intercom;
+
+void intercom_pvRegister(QueueHandle_t publisher, pv_list_t *list) {
+    list->publisher = publisher;
+    pv_list_t *last = intercom.pvHead;
+    while (last) {
+        last = last->next;
+    }
+    last->next = list;
+}
