@@ -26,9 +26,9 @@ SemaphoreHandle_t sI2C;
 
 /** Sensorik **/
 // Main
-TaskHandle_t xSensors_handle;
+TaskHandle_t xSensorsTask;
 #define xSensors_PRIORITY (7U)
-QueueHandle_t xSensors_input;
+QueueHandle_t xSensorsQueue;
 // Ultrasonic
 TaskHandle_t xUlt_handle;
 QueueHandle_t xUlt_input;

@@ -23,30 +23,12 @@
 
 /** Einstellungen **/
 
-#define REMOTE_SETTINGS_USE_NVS 1       // Einstellungen in NVS Partition persistent speichern
 #define REMOTE_CONNECTION_COUNT (10U)   // Anzahl gleichzeitiger Verbindungen
 #define REMOTE_START_AFTER_STOP 0       // Nach WLAN Error automatisch Verbindung neustarten
 #define REMOTE_RESET_AFTER_STOP 1       // Nach WLAN Error Neustarten
 
 
 /** Variablendeklaration **/
-
-enum setting_type_t {
-    SETTING_TYPE_UINT,
-    SETTING_TYPE_INT,
-    SETTING_TYPE_FLOAT
-};
-
-struct setting_t {
-    enum setting_type_t type;
-    union {
-        uint32_t ui;
-        int32_t i;
-        float f;
-    } value;
-};
-
-typedef bool (remote_settingUpdate_t)(void *cookie, struct setting_t *setting); // return true um Änderung abzulehnen
 
 
 /*

@@ -244,7 +244,7 @@ void gps_task(void* arg) {
             forward.vector.y -= gps.home.y;
             forward.vector.z -= gps.home.z;
         }
-        xQueueSendToBack(xSensors_input, &forward, 0);
+        xQueueSendToBack(xSensorsQueue, &forward, 0);
         // Geschwindigkeit
         forward.type = SENSORS_GROUNDSPEED; 
         // Koordinatensystem wechseln: GPS ist im NED, quadro ist im ENU
@@ -252,7 +252,7 @@ void gps_task(void* arg) {
         forward.vector.x = (int32_t) ((f[61] << 24) | (f[60] << 16) | (f[59] << 8) | (f[58])) / 1e+3;
         forward.vector.z = -(int32_t) ((f[65] << 24) | (f[64] << 16) | (f[63] << 8) | (f[62])) / 1e+3;
         forward.accuracy = (uint32_t) ((f[77] << 24) | (f[76] << 16) | (f[75] << 8) | (f[74])) / 1e+3;
-        xQueueSendToBack(xSensors_input, &forward, 0);
+        xQueueSendToBack(xSensorsQueue, &forward, 0);
     }
 }
 

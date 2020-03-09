@@ -31,8 +31,6 @@
 #include "httpd-freertos.c"
 #include "cgiwebsocket.h"
 #include "route.h"
-#include "nvs.h"
-#include "nvs_flash.h"
 
 
 /** Interne Abhängigkeiten **/
@@ -64,15 +62,6 @@ struct remote_input_t {
     };
 };
 
-struct remote_setting_linked_list_t {
-    char *taskTag;
-    char *settingTag;
-    remote_settingUpdate_t *updateCallback;
-    void *updateCallbackCookie;
-    struct setting_t *setting;
-    struct remote_setting_linked_list_t *next;
-};
-
 struct remote_t {
     HttpdFreertosInstance httpd;
     char httpdConn[sizeof(RtosConnType) * REMOTE_CONNECTION_COUNT];
@@ -82,8 +71,6 @@ struct remote_t {
 
     vprintf_like_t defaultLog;
     char disabledLogs[5];
-
-    struct remote_setting_linked_list_t *settingsHead;
 };
 static struct remote_t remote;
 
@@ -214,23 +201,6 @@ static CgiStatus remote_sendEmbedded(HttpdConnData *connData);
  */
 int remote_printLog(const char *format, va_list arguments);
 
-/*
- * Function: remote_settingSet
- * ----------------------------
- * Verändert eine Einstellung und aktualisiert NVS.
- * Callback kann Änderung mit true ablehnen.
- * 
- * struct remote_setting_linked_list_t *currentSetting: Einstellung aus linked List
- * char *value: neuer Wert in Textform
- *
- * returns: false -> Erfolg, true -> Error / Abgelehnt
- */
-static bool remote_settingSet(struct remote_setting_linked_list_t *currentSetting, char *value);
-
-//
-static void remote_processSetting(struct remote_input_message_t *message);
-struct remote_setting_linked_list_t* remote_settingSelect(char *taskTag, char *settingTag);
-
 
 /** Files **/
 
@@ -259,13 +229,6 @@ HttpdBuiltInUrl builtInUrls[] = {
 /** Implementierung **/
 
 bool remote_init(char* ssid, char* pw) {
-    // NVS starten
-    #if (REMOTE_SETTINGS_USE_NVS == 1)
-        if (nvs_flash_init()) {
-            if (nvs_flash_erase() || nvs_flash_init()) return true;
-        }
-    #endif
-    remote.settingsHead = calloc(1, sizeof(struct remote_setting_linked_list_t));
     // Wlan starten
     if (remote_initWlan(ssid, pw)) return true;
     // Input Queue erstellen
@@ -333,45 +296,6 @@ void remote_task(void* arg) {
     }
 }
 
-bool remote_settingRegister(const char *taskTag, const char *settingTag, remote_settingUpdate_t *updateCallback, void *updateCallbackCookie, struct setting_t *setting) {
-    // Liste nach Ende suchen
-    struct remote_setting_linked_list_t *currentSetting = remote.settingsHead;
-    while (currentSetting->next) { // Ende suchen, prüfe ob bereits registriert
-        if (!strcmp(taskTag, currentSetting->taskTag) && !strcmp(settingTag, currentSetting->settingTag)) {
-            return true;
-        }
-        currentSetting = currentSetting->next;
-    }
-    // Einstellung anhängen & verlinken
-    currentSetting->setting = calloc(1, sizeof(struct setting_t)); // neue Einstellung
-    *currentSetting->setting = *setting;
-    currentSetting->taskTag = malloc(strlen(taskTag) + 1);
-    strcpy(currentSetting->taskTag, taskTag);
-    currentSetting->settingTag = malloc(strlen(settingTag) + 1);
-    strcpy(currentSetting->settingTag, settingTag);
-    currentSetting->updateCallback = updateCallback;
-    currentSetting->updateCallbackCookie = updateCallbackCookie;
-    currentSetting->next = calloc(1, sizeof(struct remote_setting_linked_list_t)); // neues Listenelement bereithalten
-    // NVS durchsuchen
-    #if (REMOTE_SETTINGS_USE_NVS == 1)
-        nvs_handle nvsHandle;
-        if (nvs_open(taskTag, NVS_READWRITE, &nvsHandle)) return true;
-        esp_err_t ret = nvs_get_u32(nvsHandle, settingTag, &setting->value.ui);
-        if (ret == ESP_ERR_NVS_NOT_FOUND) { // Key noch nicht vorhanden -> erstellen
-            if (nvs_set_u32(nvsHandle, settingTag, setting->value.ui)) return true; // Fehler beim speichern
-            // Keine Veränderung vorgenommen, Beende Erfolgreich
-            if (nvs_commit(nvsHandle)) return true;
-            nvs_close(nvsHandle);
-            return false;
-        } else if (ret) return true;
-        // Einstellung registriert und mit NVS Wert aktualisiert -> mitteilen
-        currentSetting->updateCallback(updateCallbackCookie, currentSetting->setting);
-        if (nvs_commit(nvsHandle)) return true;
-        nvs_close(nvsHandle);
-    #endif
-    return false; // Beende Erfolgreich
-}
-
 static esp_err_t remote_connectionEventHandler(void *ctx, system_event_t *event) {
     ESP_LOGD("remote", "WiFi Event: %d", event->event_id);
     switch(event->event_id) {
@@ -437,7 +361,6 @@ static void remote_processMessage(struct remote_input_message_t *message) {
             memcpy(remote.disabledLogs, (message->data + 1), message->length - 1);
             break;
         case 'e': // Einstellungen
-            remote_processSetting(message);
             break;
         case 'r': // Report, wird vom Handy nicht verschickt
         default:
@@ -562,76 +485,4 @@ int remote_printLog(const char * format, va_list arguments) {
     input.message.timestamp = 0;
     xQueueSend(xRemote_input, &input, 0);
     return remote.defaultLog(format, arguments);
-}
-
-static bool remote_settingSet(struct remote_setting_linked_list_t *currentSetting, char *value) {
-    if (!currentSetting || !currentSetting->setting) return true;
-    // Wert auslesen
-    uint32_t valueNew;
-    switch (currentSetting->setting->type) {
-        case (SETTING_TYPE_UINT):
-            valueNew = (uint32_t) strtoul(value, NULL, 10);
-            break;
-        case (SETTING_TYPE_INT): {
-            int64_t i = strtol(value, NULL, 10);
-            if (i > INT32_MAX) i = INT32_MAX;
-            else if (i < INT32_MIN) i = INT32_MIN;
-            valueNew = (uint32_t) i;
-            break;
-        }
-        case (SETTING_TYPE_FLOAT):
-            valueNew = (uint32_t) strtof(value, NULL);
-            break;
-        default:
-            return true;
-    }
-    uint32_t valueOld = currentSetting->setting->value.ui;
-    currentSetting->setting->value.ui = valueNew;
-    ESP_LOGD("remote", "key %u -> %u", valueOld, valueNew);
-    // weiterleiten
-    if (currentSetting->updateCallback(currentSetting->updateCallbackCookie, currentSetting->setting)) {
-        currentSetting->setting->value.ui = valueOld; // wiederherstellen
-        ESP_LOGD("remote", "key wiederhergestellt");
-        return true;
-    }
-    // NVS aktualisieren
-    #if (REMOTE_SETTINGS_USE_NVS == 1)
-        nvs_handle nvsHandle;
-        if (nvs_open(currentSetting->taskTag, NVS_READWRITE, &nvsHandle)) return true;
-        if (nvs_set_u32(nvsHandle, currentSetting->settingTag, currentSetting->setting->value.ui)) return true; // Fehler beim speichern
-        if (nvs_commit(nvsHandle)) return true;
-        nvs_close(nvsHandle);
-    #endif
-    return false;
-}
-
-static void remote_processSetting(struct remote_input_message_t *message) {
-    // Tags aufschlüsseln
-    switch (*(message->data+1)) {
-        case ('?'): // Auflistung
-            break;
-        case ('v'): // aktueller Wert
-            break;
-        case ('s'): { // Wert aktualisieren -> esquadro2:abcd123:321
-            char *taskTag = strtok(message->data + 2, ":");
-            char *settingTag = strtok(NULL, ":");
-            char *value = strtok(NULL, ":");
-            struct remote_setting_linked_list_t *currentSetting = remote_settingSelect(taskTag, settingTag);
-            bool ret = remote_settingSet(currentSetting, value);
-            ESP_LOGD("remote", "settingSet -> %u", ret);
-            break;
-        }
-    }
-}
-
-struct remote_setting_linked_list_t* remote_settingSelect(char *taskTag, char *settingTag) {
-    // Liste durchsuchen
-    struct remote_setting_linked_list_t *currentSetting = remote.settingsHead;
-    while (currentSetting->next) {
-        if (!strcmp(taskTag, currentSetting->taskTag) && !strcmp(settingTag, currentSetting->settingTag)) {
-            return currentSetting;
-        }
-        currentSetting = currentSetting->next;
-    }
-    return NULL;
 }

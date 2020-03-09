@@ -297,7 +297,7 @@ static void bno_sensorEvent(void * cookie, sh2_SensorEvent_t *event) {
             break;
     }
     forward.timestamp = value.timestamp;
-    xQueueSendToBack(xSensors_input, &forward, 0);
+    xQueueSendToBack(xSensorsQueue, &forward, 0);
     return;
 }
 

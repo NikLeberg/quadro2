@@ -98,31 +98,33 @@ static command_t sensors_commands[SENSORS_COMMAND_MAX] = {
     COMMAND("setAltimeterToGPS"),
     COMMAND("resetFusion")
 };
+static COMMAND_LIST("sensors", sensors_commands, SENSORS_COMMAND_MAX);
 
 static setting_t sensors_settings[SENSORS_SETTING_MAX] = {
-    SETTING("fuseZ_errorAcceleration",  &sensors.Z.errorAcceleration,   VALUE_TYPE_FLOAT),
-    SETTING("fuseZ_errorUltrasonic",    &sensors.Z.errorUltrasonic,     VALUE_TYPE_FLOAT),
-    SETTING("fuseZ_errorBarometer",     &sensors.Z.errorBarometer,      VALUE_TYPE_FLOAT),
-    SETTING("fuseZ_errorGPS",           &sensors.Z.errorGPS,            VALUE_TYPE_FLOAT),
-    SETTING("fuseZ_limitVelocity",      &sensors.Z.limitVelocity,       VALUE_TYPE_FLOAT),
+    SETTING("zErrAccel",        &sensors.Z.errorAcceleration,   VALUE_TYPE_FLOAT),
+    SETTING("zErrUltrasonic",   &sensors.Z.errorUltrasonic,     VALUE_TYPE_FLOAT),
+    SETTING("zErrBarometer",    &sensors.Z.errorBarometer,      VALUE_TYPE_FLOAT),
+    SETTING("zErrGPS",          &sensors.Z.errorGPS,            VALUE_TYPE_FLOAT),
+    SETTING("zLimitVelocity",   &sensors.Z.limitVelocity,       VALUE_TYPE_FLOAT),
 
-    SETTING("fuseY_errorAcceleration",  &sensors.Y.errorAcceleration,   VALUE_TYPE_FLOAT),
-    SETTING("fuseY_errorGPS",           &sensors.Y.errorGPS,            VALUE_TYPE_FLOAT),
-    SETTING("fuseY_errorVelocity",      &sensors.Y.errorVelocity,       VALUE_TYPE_FLOAT),
-    SETTING("fuseY_limitVelocity",      &sensors.Y.limitVelocity,       VALUE_TYPE_FLOAT),
+    SETTING("yErrAccel",        &sensors.Y.errorAcceleration,   VALUE_TYPE_FLOAT),
+    SETTING("yErrGPS",          &sensors.Y.errorGPS,            VALUE_TYPE_FLOAT),
+    SETTING("yErrVelocity",     &sensors.Y.errorVelocity,       VALUE_TYPE_FLOAT),
+    SETTING("yLimitVelocity",   &sensors.Y.limitVelocity,       VALUE_TYPE_FLOAT),
     
-    SETTING("fuseX_errorAcceleration",  &sensors.X.errorAcceleration,   VALUE_TYPE_FLOAT),
-    SETTING("fuseX_errorGPS",           &sensors.X.errorGPS,            VALUE_TYPE_FLOAT),
-    SETTING("fuseX_errorVelocity",      &sensors.X.errorVelocity,       VALUE_TYPE_FLOAT),
-    SETTING("fuseX_limitVelocity",      &sensors.X.limitVelocity,       VALUE_TYPE_FLOAT)
+    SETTING("xErrAccel",        &sensors.X.errorAcceleration,   VALUE_TYPE_FLOAT),
+    SETTING("xErrGPS",          &sensors.X.errorGPS,            VALUE_TYPE_FLOAT),
+    SETTING("xErrVelocity",     &sensors.X.errorVelocity,       VALUE_TYPE_FLOAT),
+    SETTING("xLimitVelocity",   &sensors.X.limitVelocity,       VALUE_TYPE_FLOAT)
 };
+static SETTING_LIST("sensors", sensors_settings, SENSORS_SETTING_MAX);
 
 static pv_t sensors_pvs[SENSORS_PV_MAX] = {
     PV("x", VALUE_TYPE_FLOAT),
     PV("y", VALUE_TYPE_FLOAT),
     PV("z", VALUE_TYPE_FLOAT),
 };
-PVLIST("sensors", sensors_pvs);
+static PV_LIST("sensors", sensors_pvs, SENSORS_PV_MAX);
 
 
 /** Private Functions **/
@@ -158,9 +160,14 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
                   gpio_num_t ultTrigger, gpio_num_t ultEcho,                        // Ultraschall
                   gpio_num_t gpsRxPin, gpio_num_t gpsTxPin) {                       // GPS
     // Input-Queue erstellen
-    xSensors_input = xQueueCreate(16, sizeof(struct sensors_input_t));
+    xSensorsQueue = xQueueCreate(16, sizeof(struct sensors_input_t));
     // an Intercom anbinden
-    pvRegister(xSensors_input, sensors_pvs);
+    commandRegister(xSensorsQueue, sensors_commands);
+    settingRegister(xSensorsQueue, sensors_settings);
+    pvRegister(xSensorsQueue, sensors_pvs);
+    //
+    intercom_pvSubscribe(xSensorsQueue, xSensorsQueue, SENSORS_PV_X);
+    //
     // I2C initialisieren
     bool ret = false;
     ESP_LOGD("sensors", "I2C init");
@@ -197,7 +204,7 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     sensors_fuseX_reset();
     eekf_init(&sensors.X.ekf, &sensors.X.x, &sensors.X.P, sensors_fuseX_transition, sensors_fuseX_measurement, NULL);
     // installiere task
-    if (xTaskCreate(&sensors_task, "sensors", 3 * 1024, NULL, xSensors_PRIORITY, &xSensors_handle) != pdTRUE) return true;
+    if (xTaskCreate(&sensors_task, "sensors", 3 * 1024, NULL, xSensors_PRIORITY, &xSensorsTask) != pdTRUE) return true;
     return ret;
 }
 
@@ -220,7 +227,7 @@ void sensors_task(void* arg) {
     struct sensors_input_t input;
     // Loop
     while (true) {
-        if (xQueueReceive(xSensors_input, &input, 5000 / portTICK_PERIOD_MS) == pdTRUE) {
+        if (xQueueReceive(xSensorsQueue, &input, 5000 / portTICK_PERIOD_MS) == pdTRUE) {
             switch (input.type) {
                 case (SENSORS_ACCELERATION): {
                     ESP_LOGI("sensors", "%llu,A,%f,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z, input.accuracy);
@@ -261,8 +268,8 @@ void sensors_task(void* arg) {
                     continue;
             }
             // lösche wenn Platz gering wird
-            if (uxQueueSpacesAvailable(xSensors_input) <= 1) {
-                xQueueReset(xSensors_input);
+            if (uxQueueSpacesAvailable(xSensorsQueue) <= 1) {
+                xQueueReset(xSensorsQueue);
                 ESP_LOGE("sensors", "queue reset!");
             }
             // Timeouterkennung sh2_reinitialize(void); ?
