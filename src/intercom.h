@@ -22,7 +22,7 @@
  * PV:
  *  - Prozessvariable
  *  - Task bietet Variablen an
- *  - Task der die Werte aktualisiert informiert hiermit registrierte andere Tasks
+ *  - Task aktualisiert Variabel und informiert registrierte Tasks
  *  - sozusagen Publish / Subscribe Funktionalität
  *  - reine Events per VALUE_TYPE_NONE übermittelbar
  * 
@@ -46,8 +46,8 @@
 
 typedef enum {
     EVENT_COMMAND = 0,
-    EVENT_SETTING,
-    EVENT_PARAMETER,
+    /* EVENT_SETTING,
+    EVENT_PARAMETER, */
     EVENT_PV,
     EVENT_INTERNAL
 } event_type_t;
@@ -94,7 +94,7 @@ typedef struct {
 typedef struct command_list_s {
     const char *task;
     QueueHandle_t owner;
-    command_t *settings;
+    command_t *commands;
     size_t length;
     struct command_list_s *next;
 } command_list_t;
@@ -180,7 +180,7 @@ typedef struct {
     QueueHandle_t subscribers[INTERCOM_PV_MAX_SUBSCRIBERS];
 } pv_t;
 
-#define PV(name, type)  {(name), (type), 0, {NULL}}
+#define PV(name, type)  {(name), (type), {0}, {NULL}}
 
 typedef struct pv_list_s {
     const char *task;
@@ -194,12 +194,10 @@ typedef struct pv_list_s {
 
 #define pvRegister(queue, pvs)      intercom_pvRegister(queue, &(pvs##_list))
 
-typedef struct {
-    QueueHandle_t publisher;
-    uint32_t pv;
-    value_type_t type;
-    value_t value;
-} pv_event_t;
+#define pvPublish(publisher, pvNum)             intercom_pvPublish(publisher, pvNum, (value_t)0);
+#define pvPublishUint(publisher, pvNum, value)  intercom_pvPublish(publisher, pvNum, (value_t){.ui = value})
+#define pvPublishInt(publisher, pvNum, value)   intercom_pvPublish(publisher, pvNum, (value_t){.i = value})
+#define pvPublishFloat(publisher, pvNum, value) intercom_pvPublish(publisher, pvNum, (value_t){.f = value})
 
 
 /** To be made Private **/
@@ -225,6 +223,21 @@ void intercom_commandRegister(QueueHandle_t owner, command_list_t *list) {
         last = last->next;
     }
     last->next = list;
+}
+
+void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum) {
+    // Owner suchen
+    command_list_t *node = intercom.commandHead;
+    while (true) {
+        if (!node) return NULL; // Owner nicht vorhanden
+        if (node->owner != owner) break;
+        node = node->next;
+    }
+    // Prüfen
+    if (node->length < commandNum) return; // Command nicht vorhanden
+    // Senden
+    event_t event = {EVENT_COMMAND, (void*)commandNum};
+    xQueueSendToBack(owner, &event, 0);
 }
 
 void intercom_settingRegister(QueueHandle_t owner, setting_list_t *list) {
@@ -257,7 +270,7 @@ void intercom_pvRegister(QueueHandle_t publisher, pv_list_t *list) {
     last->next = list;
 }
 
-pv_t* intercom_pvGet(QueueHandle_t publisher, uint32_t pvNum) {
+static pv_t* intercom_pvGet(QueueHandle_t publisher, uint32_t pvNum) {
     // Publisher suchen
     pv_list_t *node = intercom.pvHead;
     while (true) {
@@ -270,24 +283,26 @@ pv_t* intercom_pvGet(QueueHandle_t publisher, uint32_t pvNum) {
     return &node->pvs[pvNum];
 }
 
-bool intercom_pvSubscribe(QueueHandle_t subscriber, QueueHandle_t publisher, uint32_t pvNum) {
+pv_t* intercom_pvSubscribe(QueueHandle_t subscriber, QueueHandle_t publisher, uint32_t pvNum) {
     pv_t *pv = intercom_pvGet(publisher, pvNum);
-    if (!pv) return true;
+    if (!pv) return NULL;
     // Subscriber speichern
     for (uint8_t i = 0; i <= INTERCOM_PV_MAX_SUBSCRIBERS; ++i) {
-        if (i == INTERCOM_PV_MAX_SUBSCRIBERS) return true; // kein Platz verfügbar
+        if (i == INTERCOM_PV_MAX_SUBSCRIBERS) return NULL; // kein Platz verfügbar
         if (pv->subscribers[i]) continue;
         pv->subscribers[i] = subscriber;
     }
-    return false;
+    return pv;
 }
 
-void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum) {
+void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum, value_t value) {
     pv_t *pv = intercom_pvGet(publisher, pvNum);
-    if (!pv) return true;
+    if (!pv) return;
+    pv->value = value;
     // an alle Subscriber senden
+    event_t event = {EVENT_PV, pv};
     for (uint8_t i = 0; i < INTERCOM_PV_MAX_SUBSCRIBERS; ++i) {
         if (pv->subscribers[i]) break;
-        xQueueSendToBack(pv->subscribers[i], 0, 0); // ToDo!
+        xQueueSendToBack(pv->subscribers[i], &event, 0);
     }
 }
