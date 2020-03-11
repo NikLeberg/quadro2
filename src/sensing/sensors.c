@@ -65,8 +65,6 @@
 /** Variablendeklaration **/
 
 struct sensors_t {
-    int64_t timeouts[SENSORS_MAX];
-
     struct { // Fusion der Z Achse (Altitude)
         eekf_context ekf;
         eekf_mat x, P, z;
@@ -227,68 +225,73 @@ void sensors_task(void* arg) {
         xQueueReceive(xSensors, &event, portMAX_DELAY);
         switch (event.type) {
             case (EVENT_COMMAND): // Befehl erhalten
-                sensors_processCommand(event.data);
+                sensors_processCommand((sensors_command_t)event.data);
                 break;
             case (EVENT_INTERNAL): // Sensorupdate erhalten
+                sensors_processData((struct sensors_input_t*)event.data);
                 break;
             case (EVENT_PV):
             default:
                 // ungültig
                 break;
-    
-        }
-        switch (input.type) {
-            case (SENSORS_ACCELERATION): {
-                ESP_LOGI("sensors", "%llu,A,%f,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z, input.accuracy);
-                // sensors_fuseX(input.type, input.vector.x, input.timestamp);
-                // sensors_fuseY(input.type, input.vector.y, input.timestamp);
-                // sensors_fuseZ(input.type, input.vector.z, input.timestamp);
-                break;
-            }
-            case (SENSORS_ORIENTATION): {
-                // ESP_LOGI("sensors", "%llu,O,%f,%f,%f,%f,%f", input.timestamp, input.orientation.i, input.orientation.j, input.orientation.k, input.orientation.real, input.accuracy);
-                break;
-            }
-            case (SENSORS_ALTIMETER): {
-                // ESP_LOGI("sensors", "%llu,B,%f,%f", input.timestamp, input.distance, input.accuracy);
-                // sensors_fuseZ(input.type, input.distance, input.timestamp);
-                break;
-            }
-            case (SENSORS_ULTRASONIC): {
-                // ESP_LOGI("sensors", "%llu,U,%f", input.timestamp, input.distance);
-                // sensors_fuseZ(input.type, input.distance, input.timestamp);
-                break;
-            }
-            case (SENSORS_POSITION): {
-                ESP_LOGI("sensors", "%llu,P,%f,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.vector.z, input.accuracy);
-                // sensors_fuseX(input.type, input.vector.x, input.timestamp);
-                // sensors_fuseY(input.type, input.vector.y, input.timestamp);
-                // sensors_fuseZ(input.type, input.vector.z, input.timestamp);
-                break;
-            }
-            case (SENSORS_GROUNDSPEED): {
-                ESP_LOGI("sensors", "%llu,S,%f,%f,%f", input.timestamp, input.vector.x, input.vector.y, input.accuracy);
-                // sensors_fuseX(input.type, input.vector.x, input.timestamp);
-                // sensors_fuseY(input.type, input.vector.y, input.timestamp);
-                // sensors_fuseZ(input.type, input.vector.z, input.timestamp);
-                break;
-            }
-            default:
-                continue;
         }
         // lösche wenn Platz gering wird
-        if (uxQueueSpacesAvailable(xSensorsQueue) <= 1) {
-            xQueueReset(xSensorsQueue);
+        if (uxQueueSpacesAvailable(xSensors) <= 1) {
+            xQueueReset(xSensors);
             ESP_LOGE("sensors", "queue reset!");
         }
-        // Timeouterkennung sh2_reinitialize(void); ?
-        sensors.timeouts[input.type] = input.timestamp;
-        input.timestamp = input.timestamp - (SENSORS_TIMEOUT_MS * 1000);
-        for (uint8_t i = 0; i < SENSORS_POSITION; ++i) { // ignoriere vorerst GPS
-            if (sensors.timeouts[i] < input.timestamp) {
-                ESP_LOGE("sensors", "timeout of sensor %u", i);
-            }
-        }
+    }
+}
+
+void sensors_processCommand(sensors_command_t command) {
+    switch (command) {
+        case (SENSORS_COMMAND_SET_HOME):
+            sensors_setHome();
+            break;
+        case (SENSORS_COMMAND_SET_ALTIMETER_TO_GPS):
+            break;
+        case (SENSORS_COMMAND_RESET_FUSION):
+            sensors_fuseX_reset();
+            sensors_fuseY_reset();
+            sensors_fuseZ_reset();
+            break;
+    }
+    return;
+}
+
+void sensors_processData(struct sensors_input_t *input) {
+    switch (input->type) {
+        case (SENSORS_ACCELERATION):
+            ESP_LOGI("sensors", "%llu,A,%f,%f,%f,%f", input->timestamp, input->vector.x, input->vector.y, input->vector.z, input->accuracy);
+            // sensors_fuseX(input->type, input->vector.x, input->timestamp);
+            // sensors_fuseY(input->type, input->vector.y, input->timestamp);
+            // sensors_fuseZ(input->type, input->vector.z, input->timestamp);
+            break;
+        case (SENSORS_ORIENTATION):
+            // ESP_LOGI("sensors", "%llu,O,%f,%f,%f,%f,%f", input->timestamp, input->orientation.i, input->orientation.j, input->orientation.k, input->orientation.real, input->accuracy);
+            break;
+        case (SENSORS_ALTIMETER):
+            // ESP_LOGI("sensors", "%llu,B,%f,%f", input->timestamp, input->distance, input->accuracy);
+            // sensors_fuseZ(input->type, input->distance, input->timestamp);
+            break;
+        case (SENSORS_ULTRASONIC):
+            // ESP_LOGI("sensors", "%llu,U,%f", input->timestamp, input->distance);
+            // sensors_fuseZ(input->type, input->distance, input->timestamp);
+            break;
+        case (SENSORS_POSITION):
+            ESP_LOGI("sensors", "%llu,P,%f,%f,%f,%f", input->timestamp, input->vector.x, input->vector.y, input->vector.z, input->accuracy);
+            // sensors_fuseX(input->type, input->vector.x, input->timestamp);
+            // sensors_fuseY(input->type, input->vector.y, input->timestamp);
+            // sensors_fuseZ(input->type, input->vector.z, input->timestamp);
+            break;
+        case (SENSORS_GROUNDSPEED):
+            ESP_LOGI("sensors", "%llu,S,%f,%f,%f", input->timestamp, input->vector.x, input->vector.y, input->accuracy);
+            // sensors_fuseX(input->type, input->vector.x, input->timestamp);
+            // sensors_fuseY(input->type, input->vector.y, input->timestamp);
+            // sensors_fuseZ(input->type, input->vector.z, input->timestamp);
+            break;
+        default:
+            break;
     }
 }
 
