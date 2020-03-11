@@ -25,18 +25,8 @@ SemaphoreHandle_t sI2C;
 /* keine */
 
 /** Sensorik **/
-// Main
 QueueHandle_t xSensors;
 #define xSensors_PRIORITY (7U)
-// Ultrasonic
-TaskHandle_t xUlt_handle;
-QueueHandle_t xUlt_input;
-// GPS
-TaskHandle_t xGps_handle;
-QueueHandle_t xGps_input;
-// BNO
-TaskHandle_t xBno_handle;
-QueueHandle_t xBno_input;
 
 // Remote
 TaskHandle_t xRemote_handle;
