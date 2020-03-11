@@ -88,6 +88,14 @@ struct sensors_t {
         eekf_value errorAcceleration, errorGPS, errorVelocity;
         eekf_value limitVelocity;
     } X;
+
+    sensors_event_t *states[SENSORS_MAX];
+
+    struct {
+        float altitude;
+        float distance;
+        vector_t position;
+    } homes;
 };
 static struct sensors_t sensors;
 
@@ -137,16 +145,18 @@ static PV_LIST("sensors", sensors_pvs, SENSORS_PV_MAX);
 void sensors_task(void* arg);
 
 // ToDo
+static void sensors_processCommand(sensors_command_t command);
+static void sensors_processData(sensors_event_t *event);
 static void sensors_fuseZ_reset();
-static void sensors_fuseZ(enum sensors_input_type_t type, float z, int64_t timestamp);
+static void sensors_fuseZ(sensors_event_type_t type, float z, int64_t timestamp);
 eekf_return sensors_fuseZ_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const *x, eekf_mat const *u, void* userData);
 eekf_return sensors_fuseZ_measurement(eekf_mat* zp, eekf_mat* Jh, eekf_mat const *x, void* userData);
 static void sensors_fuseY_reset();
-static void sensors_fuseY(enum sensors_input_type_t type, float y, int64_t timestamp);
+static void sensors_fuseY(sensors_event_type_t type, float y, int64_t timestamp);
 eekf_return sensors_fuseY_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const *x, eekf_mat const *u, void* userData);
 eekf_return sensors_fuseY_measurement(eekf_mat* zp, eekf_mat* Jh, eekf_mat const *x, void* userData);
 static void sensors_fuseX_reset();
-static void sensors_fuseX(enum sensors_input_type_t type, float x, int64_t timestamp);
+static void sensors_fuseX(sensors_event_type_t type, float x, int64_t timestamp);
 eekf_return sensors_fuseX_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const *x, eekf_mat const *u, void* userData);
 eekf_return sensors_fuseX_measurement(eekf_mat* zp, eekf_mat* Jh, eekf_mat const *x, void* userData);
 
@@ -203,17 +213,6 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     return ret;
 }
 
-void sensors_setHome() {
-    bno_setHome(); // nur Barometer
-    ult_setHome();
-    gps_setHome();
-    // Fusion zurücksetzen
-    sensors_fuseZ_reset();
-    sensors_fuseY_reset();
-    sensors_fuseX_reset();
-    return;
-}
-
 
 /* Haupttask */
 
@@ -228,7 +227,7 @@ void sensors_task(void* arg) {
                 sensors_processCommand((sensors_command_t)event.data);
                 break;
             case (EVENT_INTERNAL): // Sensorupdate erhalten
-                sensors_processData((struct sensors_input_t*)event.data);
+                //sensors_processData((sensors_event_t*)event.data);
                 break;
             case (EVENT_PV):
             default:
@@ -243,52 +242,68 @@ void sensors_task(void* arg) {
     }
 }
 
-void sensors_processCommand(sensors_command_t command) {
+static void sensors_processCommand(sensors_command_t command) {
     switch (command) {
         case (SENSORS_COMMAND_SET_HOME):
-            sensors_setHome();
-            break;
-        case (SENSORS_COMMAND_SET_ALTIMETER_TO_GPS):
-            break;
+            // Altitude
+            sensors.homes.altitude = sensors.states[SENSORS_ALTIMETER]->vector.z;
+            // Ultraschall
+            sensors.homes.distance = sensors.states[SENSORS_ULTRASONIC]->vector.z;
+            // Position
+            sensors.homes.position = sensors.states[SENSORS_POSITION]->vector;
+            // break; nach setHome immer auch Fusion zurücksetzen
         case (SENSORS_COMMAND_RESET_FUSION):
             sensors_fuseX_reset();
             sensors_fuseY_reset();
             sensors_fuseZ_reset();
             break;
+        case (SENSORS_COMMAND_SET_ALTIMETER_TO_GPS):
+            sensors.homes.altitude += sensors.states[SENSORS_POSITION]->vector.z - sensors.states[SENSORS_ALTIMETER]->vector.z;
+            break;
+        default:
+            break;
     }
     return;
 }
 
-void sensors_processData(struct sensors_input_t *input) {
-    switch (input->type) {
+static void sensors_processData(sensors_event_t *event) {
+    // Sensorzustand speichern
+    sensors.states[event->type] = event;
+    // Verarbeiten
+    switch (event->type) {
         case (SENSORS_ACCELERATION):
-            ESP_LOGI("sensors", "%llu,A,%f,%f,%f,%f", input->timestamp, input->vector.x, input->vector.y, input->vector.z, input->accuracy);
-            // sensors_fuseX(input->type, input->vector.x, input->timestamp);
-            // sensors_fuseY(input->type, input->vector.y, input->timestamp);
-            // sensors_fuseZ(input->type, input->vector.z, input->timestamp);
+            ESP_LOGI("sensors", "%llu,A,%f,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->vector.z, event->accuracy);
+            // sensors_fuseX(event->type, event->vector.x, event->timestamp);
+            // sensors_fuseY(event->type, event->vector.y, event->timestamp);
+            // sensors_fuseZ(event->type, event->vector.z, event->timestamp);
             break;
         case (SENSORS_ORIENTATION):
-            // ESP_LOGI("sensors", "%llu,O,%f,%f,%f,%f,%f", input->timestamp, input->orientation.i, input->orientation.j, input->orientation.k, input->orientation.real, input->accuracy);
+            ESP_LOGI("sensors", "%llu,O,%f,%f,%f,%f,%f", event->timestamp, event->orientation.i, event->orientation.j, event->orientation.k, event->orientation.real, event->accuracy);
             break;
         case (SENSORS_ALTIMETER):
-            // ESP_LOGI("sensors", "%llu,B,%f,%f", input->timestamp, input->distance, input->accuracy);
-            // sensors_fuseZ(input->type, input->distance, input->timestamp);
+            event->vector.z -= sensors.homes.altitude;
+            ESP_LOGI("sensors", "%llu,B,%f,%f", event->timestamp, event->vector.z, event->accuracy);
+            // sensors_fuseZ(event->type, event->distance, event->timestamp);
             break;
         case (SENSORS_ULTRASONIC):
-            // ESP_LOGI("sensors", "%llu,U,%f", input->timestamp, input->distance);
-            // sensors_fuseZ(input->type, input->distance, input->timestamp);
+            event->vector.z -= sensors.homes.distance;
+            ESP_LOGI("sensors", "%llu,U,%f", event->timestamp, event->vector.z);
+            // sensors_fuseZ(event->type, event->distance, event->timestamp);
             break;
         case (SENSORS_POSITION):
-            ESP_LOGI("sensors", "%llu,P,%f,%f,%f,%f", input->timestamp, input->vector.x, input->vector.y, input->vector.z, input->accuracy);
-            // sensors_fuseX(input->type, input->vector.x, input->timestamp);
-            // sensors_fuseY(input->type, input->vector.y, input->timestamp);
-            // sensors_fuseZ(input->type, input->vector.z, input->timestamp);
+            event->vector.x -= sensors.homes.position.x;
+            event->vector.y -= sensors.homes.position.y;
+            event->vector.z -= sensors.homes.position.z;
+            ESP_LOGI("sensors", "%llu,P,%f,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->vector.z, event->accuracy);
+            // sensors_fuseX(event->type, event->vector.x, event->timestamp);
+            // sensors_fuseY(event->type, event->vector.y, event->timestamp);
+            // sensors_fuseZ(event->type, event->vector.z, event->timestamp);
             break;
         case (SENSORS_GROUNDSPEED):
-            ESP_LOGI("sensors", "%llu,S,%f,%f,%f", input->timestamp, input->vector.x, input->vector.y, input->accuracy);
-            // sensors_fuseX(input->type, input->vector.x, input->timestamp);
-            // sensors_fuseY(input->type, input->vector.y, input->timestamp);
-            // sensors_fuseZ(input->type, input->vector.z, input->timestamp);
+            ESP_LOGI("sensors", "%llu,S,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->accuracy);
+            // sensors_fuseX(event->type, event->vector.x, event->timestamp);
+            // sensors_fuseY(event->type, event->vector.y, event->timestamp);
+            // sensors_fuseZ(event->type, event->vector.z, event->timestamp);
             break;
         default:
             break;
@@ -315,7 +330,7 @@ static void sensors_fuseZ_reset() {
     ESP_LOGV("sensors", "fuseZ reset");
 }
 
-static void sensors_fuseZ(enum sensors_input_type_t type, float z, int64_t timestamp) {
+static void sensors_fuseZ(sensors_event_type_t type, float z, int64_t timestamp) {
     // Voraussagen oder Korrigieren
     if (type == SENSORS_ACCELERATION) { // Voraussagen
         // vergangene Zeit
@@ -392,7 +407,7 @@ eekf_return sensors_fuseZ_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const 
 }
 
 eekf_return sensors_fuseZ_measurement(eekf_mat* zp, eekf_mat* Jh, eekf_mat const *x, void* userData) {
-    enum sensors_input_type_t type = *((enum sensors_input_type_t*) userData);
+    sensors_event_type_t type = *((sensors_event_type_t*) userData);
     // Messmodell an Messung anpassen
     memset(Jh->elements, 0.0f, sizeof(eekf_value) * Jh->rows * Jh->cols);
     switch (type) {
@@ -431,7 +446,7 @@ static void sensors_fuseY_reset() {
     ESP_LOGV("sensors", "fuseY reset");
 }
 
-static void sensors_fuseY(enum sensors_input_type_t type, float y, int64_t timestamp) {
+static void sensors_fuseY(sensors_event_type_t type, float y, int64_t timestamp) {
     // Voraussagen oder Korrigieren
     if (type == SENSORS_ACCELERATION) { // Voraussagen
         // vergangene Zeit
@@ -503,7 +518,7 @@ eekf_return sensors_fuseY_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const 
 }
 
 eekf_return sensors_fuseY_measurement(eekf_mat* zp, eekf_mat* Jh, eekf_mat const *x, void* userData) {
-    enum sensors_input_type_t type = *((enum sensors_input_type_t*) userData);
+    sensors_event_type_t type = *((sensors_event_type_t*) userData);
     // Messmodell an Messung anpassen
     memset(Jh->elements, 0.0f, sizeof(eekf_value) * Jh->rows * Jh->cols);
     switch (type) {
@@ -538,7 +553,7 @@ static void sensors_fuseX_reset() {
     ESP_LOGV("sensors", "fuseX reset");
 }
 
-static void sensors_fuseX(enum sensors_input_type_t type, float x, int64_t timestamp) {
+static void sensors_fuseX(sensors_event_type_t type, float x, int64_t timestamp) {
     // Voraussagen oder Korrigieren
     if (type == SENSORS_ACCELERATION) { // Voraussagen
         // vergangene Zeit
@@ -608,7 +623,7 @@ eekf_return sensors_fuseX_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const 
 }
 
 eekf_return sensors_fuseX_measurement(eekf_mat* zp, eekf_mat* Jh, eekf_mat const *x, void* userData) {
-    enum sensors_input_type_t type = *((enum sensors_input_type_t*) userData);
+    sensors_event_type_t type = *((sensors_event_type_t*) userData);
     // Messmodell an Messung anpassen
     memset(Jh->elements, 0.0f, sizeof(eekf_value) * Jh->rows * Jh->cols);
     switch (type) {
