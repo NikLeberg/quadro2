@@ -41,9 +41,10 @@
 #include "esp_log.h"
 
 /** Interne Abhängigkeiten **/
-#include "./sensing/sensors.h"
-#include "./remote/remote.h"
-#include "./info/info.h"
+#include "intercom.h"
+#include "sensing/sensors.h"
+#include "remote/remote.h"
+#include "info/info.h"
 
 // Pins
 #define I2C_SCL             GPIO_NUM_25
@@ -84,7 +85,7 @@ void app_main(void* arg) {
     // Main Loop
     while (true) {
         vTaskDelay(10000 / portTICK_PERIOD_MS);
-        sensors_setHome();
+        intercom_commandSend(xSensors, SENSORS_COMMAND_SET_HOME);
         vTaskDelay(portMAX_DELAY);
     }
 }
