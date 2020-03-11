@@ -17,7 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
-#include "freertos/ringbuf.h"
+#include "ringbuf.h"
 
 //32-bit alignment macros
 #define rbALIGN_SIZE( xSize )       ( ( xSize + portBYTE_ALIGNMENT_MASK ) & ~portBYTE_ALIGNMENT_MASK )
@@ -333,20 +333,20 @@ static void prvCopyItemByteBufRegister(Ringbuffer_t *pxRingbuffer, const uint8_t
     if (xRemLen < xItemSize) {
         //Copy as much as possible into remaining length
         for (size_t i = 0; i < xRemLen; ++i) {
-            *(pxRingbuffer->pucWrite + i) = (volatile) *pucItem;
+            ++pxRingbuffer->pucWrite;
+            *(uint8_t*)pxRingbuffer->pucWrite = *(volatile uint8_t*)pucItem;
         }
         pxRingbuffer->xItemsWaiting += xRemLen;
         //Update item arguments to account for data already written
-        pucItem += xRemLen;
         xItemSize -= xRemLen;
         pxRingbuffer->pucWrite = pxRingbuffer->pucHead;     //Reset write pointer to start of buffer
     }
     //Copy all or remaining portion of the item
     for (size_t i = 0; i < xItemSize; ++i) {
-        *(pxRingbuffer->pucWrite + i) = (volatile) *pucItem;
+        ++pxRingbuffer->pucWrite;
+        *(uint8_t*)pxRingbuffer->pucWrite = *(volatile uint8_t*)pucItem;
     }
     pxRingbuffer->xItemsWaiting += xItemSize;
-    pxRingbuffer->pucWrite += xItemSize;
 
     //Wrap around pucWrite if it reaches the end
     if (pxRingbuffer->pucWrite == pxRingbuffer->pucTail) {
