@@ -36,10 +36,3 @@
  * returns: false -> Erfolg, true -> Error
  */
 bool ult_init(gpio_num_t triggerPin, gpio_num_t echoPin);
-
-/*
- * Function: ult_setHome
- * ----------------------------
- * Setze aktuellen Abstand als Nullpunkt.
- */
-void ult_setHome();

@@ -46,11 +46,4 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin);
  *
  * struct vector_t *vector: zu rotierender Vektor
  */
-void bno_toWorldFrame(struct vector_t *vector);
-
-/*
- * Function: bno_setHome
- * ----------------------------
- * Setze aktuelle barometrische Höhe als Nullpunkt.
- */
-void bno_setHome();
+void bno_toWorldFrame(vector_t *vector);

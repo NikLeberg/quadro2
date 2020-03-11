@@ -16,8 +16,8 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
 #include "freertos/semphr.h"
+#include "ringbuf.h" // mit eigener Erweiterung
 #include <string.h>
 #include <math.h>
 #include "driver/uart.h" // uart_reg.h uart_struct.h
@@ -26,9 +26,10 @@
 
 /** Interne Abhängigkeiten **/
 
-#include "gps.h"
+#include "intercom.h"
 #include "resources.h"
 #include "sensor_types.h"
+#include "gps.h"
 
 
 /** Variablendeklaration **/
@@ -37,24 +38,16 @@
     #define M_PI 3.14159265358979323846
 #endif
 
-enum gps_input_type_t {
-    GPS_INPUT_DUMMY = 0
-};
-
-struct gps_input_t {
-    uint8_t *frame; // muss mit free() freigegeben werden
-    uint8_t length;
-    int64_t timestamp;
-};
-
-struct gps_t {
+static struct {
     gpio_num_t rxPin, txPin;
     SemaphoreHandle_t txSemphr;
 
-    bool setHome;
-    struct vector_t home;
-};
-static struct gps_t gps;
+    sensors_event_t position;
+    sensors_event_t speed;
+    event_t forward;
+} gps;
+
+static RingbufHandle_t xGps;
 
 extern uart_dev_t UART0;
 extern uart_dev_t UART1;
@@ -87,6 +80,21 @@ void gps_task(void* arg);
  * returns: false -> Erfolg, true -> Error
  */
 static bool gps_sendUBX(uint8_t *buffer, uint8_t length, bool aknowledge, TickType_t timeout);
+
+/*
+ * Function: gps_receiveUBX
+ * ----------------------------
+ * Empfange ein UBX-Frame
+ *
+ * uint8_t *payload: Buffer für Payload des Frames (mindestens so gross wie length)
+ * uint8_t class: Class der zu empfangenden Nachricht
+ * uint8_t id: Id der zu empfangenden Nachricht
+ * uint8_t length: Länge des Payloads
+ * TickType_t timeout: maximale Blockzeit
+ *
+ * returns: false -> Erfolg, true -> Error
+ */
+static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t length, TickType_t timeout);
 
 /*
  * Function: gps_interrupt
@@ -142,7 +150,10 @@ bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
     gps.rxPin = rxPin;
     gps.txPin = txPin;
     // Input Queue erstellen
-    xGps_input = xQueueCreate(2, sizeof(struct gps_input_t));
+    xGps = xRingbufferCreate(256, RINGBUF_TYPE_BYTEBUF_REGISTER_READ);
+    gps.position.type = SENSORS_POSITION;
+    gps.speed.type = SENSORS_GROUNDSPEED;
+    gps.forward.type = EVENT_INTERNAL;
     gps.txSemphr = xSemaphoreCreateMutex();
     xSemaphoreGive(gps.txSemphr);
     // eigener UART Treiber installieren
@@ -188,71 +199,51 @@ bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
                         (GPS_DATA_RATE_MS >> 8), 0x01, 0x00, 0x00, 0x00, NULL, NULL};
     if (gps_sendUBX(msgRate, sizeof(msgRate), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
     // Task starten
-    if (xTaskCreate(&gps_task, "gps", 3 * 1024, NULL, xSensors_PRIORITY - 1, &xGps_handle) != pdTRUE) return true;
+    if (xTaskCreate(&gps_task, "gps", 3 * 1024, NULL, xSensors_PRIORITY - 1, NULL) != pdTRUE) return true;
     return false;
-}
-
-void gps_setHome() {
-    gps.setHome = true;
-    return;
 }
 
 void gps_task(void* arg) {
     // Variablen
-    struct gps_input_t input = {NULL, 0, 0};
-    struct sensors_input_t forward;
+    uint8_t nav[92];
+    vector_t v;
     // UBX-NAV-PVT Frames parsen
     while (true) {
-        if (input.frame) free(input.frame); // altes Frame freigeben
-        xQueueReceive(xGps_input, &input, portMAX_DELAY);
-        if (input.length < 92 + 8) continue; // Mindestlänge (Payload + Header)
-        uint8_t *f = input.frame;
-        if (f[2] != 0x01 && f[3] != 0x07) continue; // kein UBX-NAV-PVT Frame
-        forward.timestamp = input.timestamp;
-        // // Zeit
-        // uint16_t jear = (f[11] << 8) | (f[10]);
-        // uint8_t month = f[12];
-        // uint8_t day = f[13];
-        // uint8_t hour = f[14];
-        // uint8_t minute = f[15];
-        // uint8_t second = f[16];
+        gps_receiveUBX(nav, 0x01, 0x07, 92, portMAX_DELAY);
+        gps.position.timestamp = esp_timer_get_time();
+        gps.speed.timestamp = gps.position.timestamp;
+        // Zeit
+        // uint16_t jear = (nav[5] << 8) | (nav[4]);
+        // uint8_t month = nav[6];
+        // uint8_t day = nav[7];
+        // uint8_t hour = nav[8];
+        // uint8_t minute = nav[9];
+        // uint8_t second = nav[10];
         // Fix-Typ & Satelitenanzahl
-        uint8_t fixType = f[26];
-        // uint8_t satNum = f[29];
+        uint8_t fixType = nav[20];
+        // uint8_t satNum = nav[23];
         if (fixType == 0 || fixType == 5) continue; // noch kein Fix oder nur Zeit-Fix
         // Position als y = Longitude / x = Latitude / z = Altitude
         // Laitude - Quer / Logitude - oben nach unten
-        forward.type = SENSORS_POSITION;
-        forward.vector.y = (int32_t) ((f[33] << 24) | (f[32] << 16) | (f[31] << 8) | (f[30])) * 1e-7; // °
-        forward.vector.x = (int32_t) ((f[37] << 24) | (f[36] << 16) | (f[35] << 8) | (f[34])) * 1e-7; // °
-        forward.vector.z = (int32_t) ((f[45] << 24) | (f[44] << 16) | (f[43] << 8) | (f[42])) / 1e+3; // m
-        forward.accuracy = (uint32_t) ((f[49] << 24) | (f[48] << 16) | (f[47] << 8) | (f[46])) / 1e+3; // HDOP
-        // float vAccuracy = (uint32_t) ((f[53] << 24) | (f[52] << 16) | (f[51] << 8) | (f[50])) / 1e+3; // VDOP
+        v.y = (int32_t) ((nav[27] << 24) | (nav[26] << 16) | (nav[25] << 8) | (nav[24])) * 1e-7; // °
+        v.x = (int32_t) ((nav[31] << 24) | (nav[30] << 16) | (nav[29] << 8) | (nav[28])) * 1e-7; // °
+        v.z = (int32_t) ((nav[39] << 24) | (nav[38] << 16) | (nav[37] << 8) | (nav[36])) / 1e+3; // m
+        gps.position.accuracy = (uint32_t) ((nav[43] << 24) | (nav[42] << 16) | (nav[41] << 8) | (nav[40])) / 1e+3; // HDOP
+        // float vAccuracy = (uint32_t) ((nav[47] << 24) | (nav[46] << 16) | (nav[45] << 8) | (nav[44])) / 1e+3; // VDOP
         // Longitude & Latitude in Meter umrechnen
         // -> https://gis.stackexchange.com/questions/2951
-        forward.vector.y *= 111111.0f * cosf(forward.vector.x * M_PI / 180.0f);
-        forward.vector.x *= 111111.0f;
-        // Homepunkt anwenden (aber nur bei 3D-Fix & benötigtem DOP)
-        if (gps.setHome && fixType >= 3 && forward.accuracy <= GPS_SET_HOME_MIN_DOP) {
-            gps.home = forward.vector;
-            forward.vector.x = 0.0f;
-            forward.vector.y = 0.0f;
-            forward.vector.z = 0.0f;
-            gps.setHome = false;
-        } else {
-            forward.vector.x -= gps.home.x;
-            forward.vector.y -= gps.home.y;
-            forward.vector.z -= gps.home.z;
-        }
-        xQueueSendToBack(xSensorsQueue, &forward, 0);
+        gps.position.vector.y = v.y * 111111.0f * cosf(v.x * M_PI / 180.0f);
+        gps.position.vector.x = v.x * 111111.0f;
+        gps.forward.data = &gps.position;
+        xQueueSendToBack(xSensors, &gps.forward, 0);
         // Geschwindigkeit
-        forward.type = SENSORS_GROUNDSPEED; 
         // Koordinatensystem wechseln: GPS ist im NED, quadro ist im ENU
-        forward.vector.y = (int32_t) ((f[57] << 24) | (f[56] << 16) | (f[55] << 8) | (f[54])) / 1e+3;
-        forward.vector.x = (int32_t) ((f[61] << 24) | (f[60] << 16) | (f[59] << 8) | (f[58])) / 1e+3;
-        forward.vector.z = -(int32_t) ((f[65] << 24) | (f[64] << 16) | (f[63] << 8) | (f[62])) / 1e+3;
-        forward.accuracy = (uint32_t) ((f[77] << 24) | (f[76] << 16) | (f[75] << 8) | (f[74])) / 1e+3;
-        xQueueSendToBack(xSensorsQueue, &forward, 0);
+        gps.speed.vector.y = (int32_t) ((nav[51] << 24) | (nav[50] << 16) | (nav[49] << 8) | (nav[48])) / 1e+3;
+        gps.speed.vector.x = (int32_t) ((nav[55] << 24) | (nav[54] << 16) | (nav[53] << 8) | (nav[52])) / 1e+3;
+        gps.speed.vector.z = -(int32_t) ((nav[59] << 24) | (nav[58] << 16) | (nav[57] << 8) | (nav[56])) / 1e+3;
+        gps.speed.accuracy = (uint32_t) ((nav[71] << 24) | (nav[70] << 16) | (nav[69] << 8) | (nav[68])) / 1e+3;
+        gps.forward.data = &gps.speed;
+        xQueueSendToBack(xSensors, &gps.forward, 0);
     }
 }
 
@@ -277,19 +268,43 @@ static bool gps_sendUBX(uint8_t *buffer, uint8_t length, bool aknowledge, TickTy
     UART[GPS_UART]->int_ena.tx_done = 1;
     // AK / NAK
     if (!aknowledge) return false; // kein AK erforderlich
-    bool akReceived = false;
-    timeout -= xTaskGetTickCount() - startTick;
-    // empfange aus Queue
-    struct gps_input_t input;
-    if (xQueueReceive(xGps_input, &input, timeout) == pdFALSE) return true; // Timeout
-    if (input.length == 10) { // gültige Länge, AK, Class & Id übereinstimmend
-        if (input.frame[3] && input.frame[6] == buffer[2] && input.frame[7] == buffer[3]) {
-            akReceived = true;
+    uint8_t akPayload[2];
+    if (timeout != portMAX_DELAY) timeout -= xTaskGetTickCount() - startTick;
+    if (gps_receiveUBX(akPayload, 0x05, 0x01, 2, timeout)) return true;
+    if (akPayload[0] == buffer[2] && akPayload[1] == buffer[3]) return false;
+    else return true;
+}
+
+static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t length, TickType_t timeout) {
+    TickType_t startTick = xTaskGetTickCount();
+    uint8_t *sync = NULL;
+    do { // suche nach Sync "u"
+        sync = xRingbufferReceiveUpTo(xGps, NULL, timeout, 1);
+        if (!sync) return true; // timeout
+        vRingbufferReturnItem(xGps, sync);
+        if (timeout != portMAX_DELAY) timeout -= xTaskGetTickCount() - startTick;
+    } while (*sync != 0xb5);
+    size_t rxLength = 0;
+    uint8_t *rx = xRingbufferReceiveUpTo(xGps, &rxLength, timeout, length + 7);
+    bool ret = true;
+    if (rxLength >= 7) {
+        if (rxLength == length + 7
+        && rx[0] == 0x62 // Sync 2 "B"
+        && rx[1] == class && rx[2] == id // Class & Id
+        && rx[3] == (0x00ff & length) && rx[4] == (length >> 8)) { // Länge
+            uint8_t ckA = 0, ckB = 0; // Prüfsumme Ok?
+            for (uint16_t i = 1; i < length + 7; i++) {
+                ckA += rx[i];
+                ckB += ckA;
+            }
+            if (ckA == rx[length + 5] && ckB != rx[length + 6]) {
+                memcpy(payload, rx + 5, length);
+                ret = false;
+            }
         }
     }
-    free(input.frame);
-    if (akReceived) return false;
-    else return true; // Ungültige Antwort
+    vRingbufferReturnItem(xGps, rx);
+    return ret;
 }
 
 static void gps_interrupt(void* arg) {
@@ -300,94 +315,16 @@ static void gps_interrupt(void* arg) {
     if (status & UART_TX_DONE_INT_ST_M) { // tx beendet, entsperren
         uart->int_ena.tx_done = 0; // interrupt deaktivieren
         xSemaphoreGiveFromISR(gps.txSemphr, &woken);
-        if (woken == pdTRUE) portYIELD_FROM_ISR();
     } else if (status & UART_RXFIFO_TOUT_INT_ST_M || // rx-Frame erhalten
                status & UART_RXFIFO_FULL_INT_ST_M || // rx-FIFO bald voll
                status & UART_RXFIFO_OVF_INT_ST_M) {  // rx-FIFO Überlauf
-        // FIFO einlesen als UBX-Frame
-        uint16_t frameSize = 0, payloadSize = 0; // erwartete Länge
-        uint8_t framePos = 0, class = 0x00, id = 0x00, *frame = NULL, ckA = 0, ckB = 0;
-        while (uart->status.rxfifo_cnt) {
-            if (frameSize && framePos >= frameSize) break; // Frame komplett
-            uint8_t c = uart->fifo.rw_byte;
-            switch (framePos) {
-                case (0): { // Sync 1
-                    if (c == 0xb5) framePos = 1;
-                    continue;
-                }
-                case (1): { // Sync 2
-                    if (c == 0x62) ++framePos;
-                    else framePos = 0;
-                    continue;
-                }
-                case (2): { // Class
-                    class = c;
-                    ++framePos;
-                    continue;
-                }
-                case (3): { // Id
-                    id = c;
-                    ++framePos;
-                    continue;
-                }
-                case (4): { // Size LSB
-                    payloadSize = c;
-                    ++framePos;
-                    continue;
-                }
-                case (5): { // Size MSB
-                    payloadSize |= ((uint16_t) c << 8);
-                    frameSize = payloadSize + 6 + 2; // Header + Prüfsumme hinzufügen
-                    if (frameSize > UART_FIFO_LEN) { // zu gross für FIFO, verwerfen
-                        framePos = 0;
-                        continue;
-                    }
-                    // Speicher für Frame allozieren und Header rekonstruieren;
-                    frame = (uint8_t*) calloc(frameSize, sizeof(uint8_t));
-                    if (!frame) continue;
-                    frame[0] = 0xb5;
-                    frame[1] = 0x62;
-                    frame[2] = class;
-                    frame[3] = id;
-                    frame[4] = payloadSize;
-                    frame[5] = c; // payloadSize >> 8
-                    ++framePos;
-                    continue;
-                }
-                default: { // Framepayload füllen
-                    frame[framePos] = c;
-                    ++framePos;
-                    continue;
-                }
-            }
-        }
-        // etwas empfangen?
-        if (!framePos && !frameSize)  return; // nichts empfangen
-        // empfangen == erwartet?
-        if (framePos != frameSize) {
-            if (frame) free(frame);
-            return; // Frame verwerfen
-        }
-        // Prüfsumme Ok?
-        for (uint8_t i = 2; i < (frameSize - 2); ++i) {
-            ckA = ckA + frame[i];
-            ckB = ckB + ckA;
-        }
-        if (ckA != frame[frameSize - 2] || ckB != frame[frameSize - 1]) {
-            if (frame) free(frame);
-            return; // Frame verwerfen
-        }
-        // in Queue einreihen
-        struct gps_input_t input;
-        input.frame = frame;
-        input.length = frameSize;
-        input.timestamp = esp_timer_get_time();
-        xQueueSendToBackFromISR(xGps_input, &input, &woken);
-        if (woken == pdTRUE) portYIELD_FROM_ISR();
+        // FIFO in Ringbuffer einlesen
+        xRingbufferSendFromISR(xGps, &uart->fifo.rw_byte, uart->status.rxfifo_cnt, &woken);
     } else if (status & UART_FRM_ERR_INT_ST_M) { // rx-Frame Error
         // FIFO zurücksetzen
         gps_uartRxFifoReset();
     }
+    if (woken == pdTRUE) portYIELD_FROM_ISR();
 }
 
 static bool gps_uartBaudrate(uint32_t baud_rate) {

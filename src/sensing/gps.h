@@ -21,7 +21,6 @@
 
 #define GPS_UART                UART_NUM_1
 #define GPS_DATA_RATE_MS        1000 // 1 Hz
-#define GPS_SET_HOME_MIN_DOP    20.0f // 20 m
 
 
 /*
@@ -35,11 +34,3 @@
  * returns: false -> Erfolg, true -> Error
  */
 bool gps_init(gpio_num_t rxPin, gpio_num_t txPin);
-
-/*
- * Function: gps_setHome
- * ----------------------------
- * Setze aktuelle Position als Homepunkt.
- * Wird erst beim nächsten guten Fix angewendet!
- */
-void gps_setHome();

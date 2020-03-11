@@ -4,7 +4,7 @@
  * Author: Niklaus Leuenberger
  * Date:   2020-01-09
  * ----------------------------
- *   Warteschlangen Input aller Sensortypen
+ * Warteschlangen Events "EVENT_INTERNAL" aller Sensortypen
  */
 
 
@@ -13,15 +13,13 @@
 
 /** Externe Abhängigkeiten **/
 
-#include "sh2_SensorValue.h"
-
 
 /** Interne Abhängigkeiten **/
 
 
 /** Variablendeklaration **/
 
-enum sensors_input_type_t {
+typedef enum {
     SENSORS_ACCELERATION, // m/s^2
     SENSORS_ORIENTATION, // Quaternion
     SENSORS_ALTIMETER, // umgerechneter Druck Pa -> m
@@ -29,29 +27,28 @@ enum sensors_input_type_t {
     SENSORS_POSITION, // GPS Fix lat/lon/alt
     SENSORS_GROUNDSPEED, // m/s
     SENSORS_MAX
-};
+} sensors_event_type_t;
 
-struct vector_t { // generischer Vektor
+typedef struct { // generischer Vektor
     union {
         struct {
             float x, y, z;
         };
         float v[3];
     };
-};
+} vector_t;
 
-struct orientation_t { // Orientierung
+typedef struct { // Orientierung
     float i, j, k;
     float real;
-};
+} orientation_t;
 
-struct sensors_input_t {
-    enum sensors_input_type_t type;
+typedef struct {
+    sensors_event_type_t type;
     int64_t timestamp;
     union {
-        struct vector_t vector;
-        struct orientation_t orientation;
-        float distance; // generische Distanz
+        vector_t vector;
+        orientation_t orientation;
     };
     float accuracy; // Genauigkeit der Daten
-};
+} sensors_event_t;

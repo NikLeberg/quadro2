@@ -25,42 +25,34 @@
 
 /** Interne Abhängigkeiten **/
 
-#include "i2c.h"
-#include "bno.h"
+#include "intercom.h"
 #include "resources.h"
+#include "i2c.h"
 #include "sensor_types.h"
+#include "bno.h"
 
 
 /** Variablendeklaration **/
 
-enum bno_input_type_t {
-    BNO_INPUT_INTERRUPT
-};
-
-typedef void (bno_dataCallback_t)(sh2_SensorValue_t value);
-
-struct bno_input_t {
-    enum bno_input_type_t type;
-    union {
-        struct { // BNO_INPUT_INTERRUPT
-            int64_t timestamp;
-        };
+typedef struct {
+    struct {
+        int64_t timestamp;
     };
-};
+} bno_event_t;
 
-struct bno_t {
+static struct {
     uint8_t address;
     gpio_num_t resetPin, interruptPin;
     sh2_rxCallback_t *onRx;
     uint8_t rxBuffer[SH2_HAL_MAX_TRANSFER];
 
-    portMUX_TYPE spinLock;
-    sh2_RotationVectorWAcc_t lastOrientation;
+    sensors_event_t acceleration;
+    sensors_event_t orientation;
+    sensors_event_t altitude;
+    event_t forward;
+} bno;
 
-    bool setHome;
-    float homeAltitude;
-};
-static struct bno_t bno;
+static QueueHandle_t xBno;
 
 
 /** Private Functions **/
@@ -125,10 +117,12 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin) {
     bno.address = address;
     bno.interruptPin = interruptPin;
     bno.resetPin = resetPin;
-    // Input Queue & Spinlock erstellen
-    xBno_input = xQueueCreate(4, sizeof(struct bno_input_t));
-    bno.spinLock.owner = portMUX_FREE_VAL;
-    bno.spinLock.count = 0;
+    // Input Queue
+    xBno = xQueueCreate(4, sizeof(bno_event_t));
+    bno.acceleration.type = SENSORS_ACCELERATION;
+    bno.orientation.type = SENSORS_ORIENTATION;
+    bno.altitude.type = SENSORS_ALTIMETER;
+    bno.forward.type = EVENT_INTERNAL;
     // konfiguriere Pins und aktiviere Interrupts
     gpio_config_t gpioConfig;
     gpioConfig.pin_bit_mask = ((1ULL) << resetPin);
@@ -147,7 +141,7 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin) {
     gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
     if (gpio_isr_handler_add(interruptPin, &bno_interrupt, NULL)) return true;
     // Task starten
-    if (xTaskCreate(&bno_task, "bno", 3 * 1024, NULL, xSensors_PRIORITY - 1, &xBno_handle) != pdTRUE) return true;
+    if (xTaskCreate(&bno_task, "bno", 3 * 1024, NULL, xSensors_PRIORITY - 1, NULL) != pdTRUE) return true;
     // SensorHub-2 Bibliothek starten
     SemaphoreHandle_t sInitDone = xSemaphoreCreateBinary();
     if (sh2_initialize(&bno_initDone, sInitDone)) return true;
@@ -163,53 +157,44 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin) {
 
 void bno_task(void* arg) {
     // Variablen
-    struct bno_input_t input;
+    bno_event_t event;
     uint16_t readLength, rxRemaining = 0;
     uint8_t timeoutCount = 0;
     // Loop
     while (true) {
-        if (xQueueReceive(xBno_input, &input, (BNO_DATA_RATE_IMU_US / 1000 / portTICK_PERIOD_MS) + 1) == pdTRUE) {
-            switch (input.type) {
-                case (BNO_INPUT_INTERRUPT): {
-                    // ist sh2-Lib registriert?
-                    if (!bno.onRx) break;
-                    // Datenlänge berechnen, mindestens Header, maximal MAX_TRANSFER
-                    readLength = rxRemaining;
-                    if (readLength < SHTP_HEADER_LEN) readLength = SHTP_HEADER_LEN;
-                    if (readLength > SH2_HAL_MAX_TRANSFER) readLength = SH2_HAL_MAX_TRANSFER;
-                    // Lesen
-                    if (i2c_read(bno.address, bno.rxBuffer, readLength)) break;
-                    // Ermittle Datenlänge des SHTP-Packets
-                    uint16_t cargoLength;
-                    cargoLength = ((bno.rxBuffer[1] << 8) + (bno.rxBuffer[0])) & 0x7fff;
-                    if (!cargoLength) break;
-                    // verbleibende Daten berechnen
-                    if (cargoLength > readLength) {
-                        rxRemaining = (cargoLength - readLength) + SHTP_HEADER_LEN;
-                    } else rxRemaining = 0;
-                    // an sh2-Lib übergeben
-                    bno.onRx(NULL, bno.rxBuffer, readLength, input.timestamp);
-                    break;
-                }
-            }
+        if (xQueueReceive(xBno, &event, (BNO_DATA_RATE_IMU_US / 1000 / portTICK_PERIOD_MS) + 1) == pdTRUE) {
+            // ist sh2-Lib registriert?
+            if (!bno.onRx) continue;
+            // Datenlänge berechnen, mindestens Header, maximal MAX_TRANSFER
+            readLength = rxRemaining;
+            if (readLength < SHTP_HEADER_LEN) readLength = SHTP_HEADER_LEN;
+            if (readLength > SH2_HAL_MAX_TRANSFER) readLength = SH2_HAL_MAX_TRANSFER;
+            // Lesen
+            if (i2c_read(bno.address, bno.rxBuffer, readLength)) continue;
+            // Ermittle Datenlänge des SHTP-Packets
+            uint16_t cargoLength;
+            cargoLength = ((bno.rxBuffer[1] << 8) + (bno.rxBuffer[0])) & 0x7fff;
+            if (!cargoLength) continue;
+            // verbleibende Daten berechnen
+            if (cargoLength > readLength) {
+                rxRemaining = (cargoLength - readLength) + SHTP_HEADER_LEN;
+            } else rxRemaining = 0;
+            // an sh2-Lib übergeben
+            bno.onRx(NULL, bno.rxBuffer, readLength, event.timestamp);
             timeoutCount = 0;
         } else { // vermutlich ein Interrupt verpasst, prüfe
             if (gpio_get_level(bno.interruptPin) == 0 || ++timeoutCount > 10) {
-                struct bno_input_t input;
-                input.type = BNO_INPUT_INTERRUPT;
-                input.timestamp = esp_timer_get_time();
-                xQueueSendToBack(xBno_input, &input, 0);
+                event.timestamp = esp_timer_get_time();
+                xQueueSendToBack(xBno, &event, 0);
             }
         }
     }
 }
 
-void bno_toWorldFrame(struct vector_t *vector) {
+void bno_toWorldFrame(vector_t *vector) {
     // (q.r * q.r - dot(q, q)) * v + 2.0f * dot(q, v) * q + 2.0f * q.r * cross(q, v);
-    struct vector_t v = *vector;
-    portENTER_CRITICAL(&bno.spinLock);
-    sh2_RotationVectorWAcc_t q = bno.lastOrientation;
-    portEXIT_CRITICAL(&bno.spinLock);
+    vector_t v = *vector;
+    orientation_t q = bno.orientation.orientation;
     float factor;
 
     factor  = q.real * q.real;
@@ -237,11 +222,6 @@ void bno_toWorldFrame(struct vector_t *vector) {
     return;
 }
 
-void bno_setHome() {
-    bno.setHome = true;
-    return;
-}
-
 static bool bno_sensorEnable(sh2_SensorId_t sensorId, uint32_t interval_us) {
     sh2_SensorConfig_t config;
     config.changeSensitivityEnabled = false;
@@ -259,51 +239,41 @@ static void bno_sensorEvent(void * cookie, sh2_SensorEvent_t *event) {
     sh2_SensorValue_t value;
     if (sh2_decodeSensorEvent(&value, event)) return;
     // Daten verarbeitet an Sensortask weitergeben
-    struct sensors_input_t forward;
     switch (value.sensorId) {
-        case (SH2_LINEAR_ACCELERATION): // Beschleunigung in globalem Koordinatensystem
-            forward.type = SENSORS_ACCELERATION;
-            forward.vector.x = value.un.linearAcceleration.x;
-            forward.vector.y = value.un.linearAcceleration.y;
-            forward.vector.z = value.un.linearAcceleration.z;
-            bno_toWorldFrame(&forward.vector);
-            forward.accuracy = value.status & 0b00000011;
+        case (SH2_LINEAR_ACCELERATION): { // Beschleunigung in globalem Koordinatensystem
+            vector_t v;
+            v.x = value.un.linearAcceleration.x;
+            v.y = value.un.linearAcceleration.y;
+            v.z = value.un.linearAcceleration.z;
+            bno_toWorldFrame(&v);
+            bno.acceleration.vector = v;
+            bno.acceleration.accuracy = value.status & 0b00000011;
+            bno.forward.data = &bno.acceleration;
             break;
+        }
         case (SH2_ROTATION_VECTOR):
-            portENTER_CRITICAL(&bno.spinLock);
-            bno.lastOrientation = value.un.rotationVector; // interne Kopie
-            portEXIT_CRITICAL(&bno.spinLock);
-            forward.type = SENSORS_ORIENTATION;
-            forward.orientation.i = value.un.rotationVector.i;
-            forward.orientation.j = value.un.rotationVector.j;
-            forward.orientation.k = value.un.rotationVector.k;
-            forward.orientation.real = value.un.rotationVector.real;
-            forward.accuracy = value.un.rotationVector.accuracy;
+            bno.orientation.orientation.i = value.un.rotationVector.i;
+            bno.orientation.orientation.j = value.un.rotationVector.j;
+            bno.orientation.orientation.k = value.un.rotationVector.k;
+            bno.orientation.orientation.real = value.un.rotationVector.real;
+            bno.orientation.accuracy = value.un.rotationVector.accuracy;
+            bno.forward.data = &bno.orientation;
             break;
         case (SH2_PRESSURE): // Druck in Meter über Meer umrechnen
-            forward.type = SENSORS_ALTIMETER;
-            forward.distance = (228.15f / 0.0065f) * (1.0f - powf(value.un.pressure.value / 1013.25f, (1.0f / 5.255f)));
-            forward.accuracy = value.status & 0b00000011;
-            // Homepunkt anwenden
-            if (bno.setHome) {
-                bno.homeAltitude = forward.distance;
-                forward.distance = 0.0f;
-                bno.setHome = false;
-            } else {
-                forward.distance -= bno.homeAltitude;
-            }
+            bno.altitude.vector.z = (228.15f / 0.0065f) * (1.0f - powf(value.un.pressure.value / 1013.25f, (1.0f / 5.255f)));
+            bno.altitude.accuracy = value.status & 0b00000011;
+            bno.forward.data = &bno.altitude;
             break;
         default:
             break;
     }
-    forward.timestamp = value.timestamp;
-    xQueueSendToBack(xSensorsQueue, &forward, 0);
+    xQueueSendToBack(xSensors, &bno.forward, 0);
     return;
 }
 
 static void IRAM_ATTR bno_interrupt(void* arg) {
     BaseType_t woken;
-    struct bno_input_t input;
+    bno_event_t event;
     bool level;
     if (bno.interruptPin < 32) { // gpio_get_level ist nicht im IRAM
         level = (GPIO.in >> bno.interruptPin) & 0x1;
@@ -311,9 +281,8 @@ static void IRAM_ATTR bno_interrupt(void* arg) {
         level = (GPIO.in1.data >> (bno.interruptPin - 32)) & 0x1;
     }
     if (!level) {
-        input.type = BNO_INPUT_INTERRUPT;
-        input.timestamp = esp_timer_get_time();
-        xQueueSendToBackFromISR(xBno_input, &input, &woken);
+        event.timestamp = esp_timer_get_time();
+        xQueueSendToBackFromISR(xBno, &event, &woken);
         if (woken == pdTRUE) portYIELD_FROM_ISR();
     }
 }
