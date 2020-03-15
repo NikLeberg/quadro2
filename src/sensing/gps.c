@@ -222,7 +222,7 @@ void gps_task(void* arg) {
         // Fix-Typ & Satelitenanzahl
         uint8_t fixType = nav[20];
         // uint8_t satNum = nav[23];
-        if (fixType == 0 || fixType == 5) continue; // noch kein Fix oder nur Zeit-Fix
+        // if (fixType == 0 || fixType == 5) continue; // noch kein Fix oder nur Zeit-Fix
         // Position als y = Longitude / x = Latitude / z = Altitude
         // Laitude - Quer / Logitude - oben nach unten
         v.y = (int32_t) ((nav[27] << 24) | (nav[26] << 16) | (nav[25] << 8) | (nav[24])) * 1e-7; // °
@@ -293,11 +293,11 @@ static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t
         && rx[1] == class && rx[2] == id // Class & Id
         && rx[3] == (0x00ff & length) && rx[4] == (length >> 8)) { // Länge
             uint8_t ckA = 0, ckB = 0; // Prüfsumme Ok?
-            for (uint16_t i = 1; i < length + 7; i++) {
+            for (uint16_t i = 1; i < length + 5; i++) {
                 ckA += rx[i];
                 ckB += ckA;
             }
-            if (ckA == rx[length + 5] && ckB != rx[length + 6]) {
+            if (ckA == rx[length + 5] && ckB == rx[length + 6]) {
                 memcpy(payload, rx + 5, length);
                 ret = false;
             }
@@ -319,7 +319,7 @@ static void gps_interrupt(void* arg) {
                status & UART_RXFIFO_FULL_INT_ST_M || // rx-FIFO bald voll
                status & UART_RXFIFO_OVF_INT_ST_M) {  // rx-FIFO Überlauf
         // FIFO in Ringbuffer einlesen
-        xRingbufferSendFromISR(xGps, &uart->fifo.rw_byte, uart->status.rxfifo_cnt, &woken);
+        xRingbufferSendFromISR(xGps, &uart->fifo.rw_byte, (uint32_t)uart->status.rxfifo_cnt, &woken);
     } else if (status & UART_FRM_ERR_INT_ST_M) { // rx-Frame Error
         // FIFO zurücksetzen
         gps_uartRxFifoReset();

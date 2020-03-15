@@ -45,6 +45,8 @@ static struct {
     gpio_num_t resetPin, interruptPin;
     sh2_rxCallback_t *onRx;
     uint8_t rxBuffer[SH2_HAL_MAX_TRANSFER];
+    SemaphoreHandle_t sh2Lock;
+    bool recoveryPending;
 
     sensors_event_t acceleration;
     sensors_event_t orientation;
@@ -109,6 +111,9 @@ static void bno_initDone(void *cookie, sh2_AsyncEvent_t *event);
  */
 static bool bno_sensorEnable(sh2_SensorId_t sensorId, uint32_t interval_us);
 
+// ToDo
+static void bno_recover(void *arg);
+
 
 /** Implementierung **/
 
@@ -143,6 +148,7 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin) {
     // Task starten
     if (xTaskCreate(&bno_task, "bno", 3 * 1024, NULL, xSensors_PRIORITY - 1, NULL) != pdTRUE) return true;
     // SensorHub-2 Bibliothek starten
+    bno.sh2Lock = xSemaphoreCreateBinary();
     SemaphoreHandle_t sInitDone = xSemaphoreCreateBinary();
     if (sh2_initialize(&bno_initDone, sInitDone)) return true;
     if (xSemaphoreTake(sInitDone, BNO_STARTUP_WAIT_MS / portTICK_PERIOD_MS) == pdFALSE) return true; // warte auf Initialisierung
@@ -174,7 +180,13 @@ void bno_task(void* arg) {
             // Ermittle Datenlänge des SHTP-Packets
             uint16_t cargoLength;
             cargoLength = ((bno.rxBuffer[1] << 8) + (bno.rxBuffer[0])) & 0x7fff;
-            if (!cargoLength) continue;
+            if (!cargoLength) {
+                if (timeoutCount > 3) {
+                    timeoutCount = 0;
+                    bno_recover(NULL); // längst fällig
+                }
+                else continue;
+            }
             // verbleibende Daten berechnen
             if (cargoLength > readLength) {
                 rxRemaining = (cargoLength - readLength) + SHTP_HEADER_LEN;
@@ -183,7 +195,7 @@ void bno_task(void* arg) {
             bno.onRx(NULL, bno.rxBuffer, readLength, event.timestamp);
             timeoutCount = 0;
         } else { // vermutlich ein Interrupt verpasst, prüfe
-            if (gpio_get_level(bno.interruptPin) == 0 || ++timeoutCount > 10) {
+            if (gpio_get_level(bno.interruptPin) == 0 || ++timeoutCount > 3) {
                 event.timestamp = esp_timer_get_time();
                 xQueueSendToBack(xBno, &event, 0);
             }
@@ -248,6 +260,7 @@ static void bno_sensorEvent(void * cookie, sh2_SensorEvent_t *event) {
             bno_toWorldFrame(&v);
             bno.acceleration.vector = v;
             bno.acceleration.accuracy = value.status & 0b00000011;
+            bno.acceleration.timestamp = value.timestamp;
             bno.forward.data = &bno.acceleration;
             break;
         }
@@ -257,11 +270,13 @@ static void bno_sensorEvent(void * cookie, sh2_SensorEvent_t *event) {
             bno.orientation.orientation.k = value.un.rotationVector.k;
             bno.orientation.orientation.real = value.un.rotationVector.real;
             bno.orientation.accuracy = value.un.rotationVector.accuracy;
+            bno.orientation.timestamp = value.timestamp;
             bno.forward.data = &bno.orientation;
             break;
         case (SH2_PRESSURE): // Druck in Meter über Meer umrechnen
             bno.altitude.vector.z = (228.15f / 0.0065f) * (1.0f - powf(value.un.pressure.value / 1013.25f, (1.0f / 5.255f)));
             bno.altitude.accuracy = value.status & 0b00000011;
+            bno.altitude.timestamp = value.timestamp;
             bno.forward.data = &bno.altitude;
             break;
         default:
@@ -293,6 +308,39 @@ static void bno_initDone(void *cookie, sh2_AsyncEvent_t *event) {
     }
 }
 
+static void bno_recover(void *arg) {
+    // starte sich selbst als Task
+    // if (!(uint32_t)arg) {
+    //     if (bno.recoveryPending) return;
+    //     ESP_LOGE("bno", "start of recovery task!");
+    //     bno.recoveryPending = true;
+    //     xTaskCreate(&bno_recover, "bno_recover", 2 * 1024, (void*)1, xSensors_PRIORITY + 1, NULL);
+    // } else {
+    //     BaseType_t ret = pdFALSE;
+    //     sh2_reinitialize();
+    //     ret = xSemaphoreTake(bno.sh2Lock, 1000 / portTICK_PERIOD_MS);
+    //     xSemaphoreGive(bno.sh2Lock);
+    //     if (ret == pdFALSE) {
+    //         ESP_LOGE("bno", "timeout, hard reset");
+    //         xSemaphoreGive(bno.sh2Lock);
+    //         SemaphoreHandle_t sInitDone = xSemaphoreCreateBinary();
+    //         sh2_initialize(&bno_initDone, sInitDone);
+    //         ret = xSemaphoreTake(sInitDone, 1000 / portTICK_PERIOD_MS);
+    //         vSemaphoreDelete(sInitDone);
+    //         if (ret == pdFALSE) {
+    //             ESP_LOGE("bno", "recovery failed!");
+    //             vTaskDelete(NULL);
+    //         }
+    //     }
+    //     bno_sensorEnable(SH2_ROTATION_VECTOR, BNO_DATA_RATE_IMU_US);
+    //     bno_sensorEnable(SH2_LINEAR_ACCELERATION, BNO_DATA_RATE_IMU_US);
+    //     bno_sensorEnable(SH2_PRESSURE, BNO_DATA_RATE_PRESSURE_US);
+    //     ESP_LOGE("bno", "recovery done!");
+    //     bno.recoveryPending = false;
+    //     vTaskDelete(NULL);
+    // }
+}
+
 /** sh2-hal Implementierung (sh2_hal.h) **/
 int sh2_hal_reset(bool dfuMode, sh2_rxCallback_t *onRx, void *cookie) {
     // DFU-Modus nicht unterstützt
@@ -317,9 +365,11 @@ int sh2_hal_rx(uint8_t *pData, uint32_t len) {
 }
 
 int sh2_hal_block(void) {
+    xSemaphoreTake(bno.sh2Lock, portMAX_DELAY);
     return false; // rx-tx blockiert automatisch
 }
 
 int sh2_hal_unblock(void) {
+    xSemaphoreGive(bno.sh2Lock);
     return false; // rx-tx blockiert automatisch
 }

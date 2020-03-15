@@ -227,7 +227,7 @@ void sensors_task(void* arg) {
                 sensors_processCommand((sensors_command_t)event.data);
                 break;
             case (EVENT_INTERNAL): // Sensorupdate erhalten
-                //sensors_processData((sensors_event_t*)event.data);
+                sensors_processData((sensors_event_t*)event.data);
                 break;
             case (EVENT_PV):
             default:
