@@ -109,6 +109,8 @@ void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum);
 
 #define commandRegister(queue, commands)        intercom_commandRegister(queue, &(commands##_list))
 
+char* intercom_commandList();
+
 
 /*
  * Types: Einstellungen

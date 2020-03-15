@@ -36,8 +36,11 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include <string.h>
+#include <stdio.h>
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "esp_log.h"
 
 
 /** Interne Abhängigkeiten **/
@@ -73,10 +76,14 @@ void intercom_commandRegister(QueueHandle_t owner, command_list_t *list) {
     // an Linked-List anhängen
     list->owner = owner;
     command_list_t *last = intercom.commandHead;
-    while (last) {
-        last = last->next;
+    if (last) {
+        while (last->next) {
+            last = last->next;
+        }
+        last->next = list;
+    } else { // erstes
+        intercom.commandHead = list;
     }
-    last->next = list;
 }
 
 void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum) {
@@ -92,6 +99,38 @@ void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum) {
     // Senden
     event_t event = {EVENT_COMMAND, (void*)commandNum};
     xQueueSendToBack(owner, &event, 0);
+}
+
+// sensors:00(setHome:00,resetFusion:01,setAltToGps:02,)
+char* intercom_commandList() {
+    // Grösse ermitteln
+    size_t strLen = 1; // '\0'
+    command_list_t *node = intercom.commandHead;
+    while (node) {
+        strLen += 5; // _:00(_)
+        strLen += strlen(node->task);
+        for (size_t i = 0; i < node->length; ++i) {
+            strLen += strlen(node->commands[i].name);
+            strLen += 4; // _:00,
+        }
+        node = node->next;
+    }
+    char *str = malloc(strLen);
+    // Zusammensetzen
+    FILE *f = fmemopen(str, strLen, "w");
+    size_t nodeCount = 0;
+    node = intercom.commandHead;
+    while (node) {
+        fprintf(f, "%s:%02d(", node->task, nodeCount);
+        for (size_t i = 0; i < node->length; ++i) {
+            fprintf(f, "%s:%02d,", node->commands[i].name, i);
+        }
+        fprintf(f, ")");
+        node = node->next;
+        ++nodeCount;
+    }
+    fclose(f);
+    return str;
 }
 
 
@@ -113,15 +152,20 @@ void intercom_settingRegister(QueueHandle_t owner, setting_list_t *list) {
     // an Linked-List anhängen
     list->owner = owner;
     setting_list_t *last = intercom.settingHead;
-    while (last) {
-        last = last->next;
+    if (last) {
+        while (last->next) {
+            last = last->next;
+        }
+        last->next = list;
+    } else { // erstes
+        intercom.settingHead = list;
     }
-    last->next = list;
     // Einstellung aus NVS laden
     nvs_handle nvs;
     esp_err_t err;
     err = nvs_open(list->task, NVS_READWRITE, &nvs);
     if (err == ESP_ERR_NVS_NOT_INITIALIZED) {
+        esp_log_level_set("nvs", ESP_LOG_INFO);
         if (nvs_flash_init()) {
             if (nvs_flash_erase() || nvs_flash_init()) return;
         }
@@ -155,10 +199,14 @@ void intercom_parameterRegister(QueueHandle_t owner, parameter_list_t *list) {
     // an Linked-List anhängen
     list->owner = owner;
     parameter_list_t *last = intercom.parameterHead;
-    while (last) {
-        last = last->next;
+    if (last) {
+        while (last->next) {
+            last = last->next;
+        }
+        last->next = list;
+    } else { // erstes
+        intercom.parameterHead = list;
     }
-    last->next = list;
 }
 
 static parameter_t *intercom_parameterSearch(QueueHandle_t owner, uint32_t parameterNum) {
@@ -245,10 +293,14 @@ void intercom_pvRegister(QueueHandle_t publisher, pv_list_t *list) {
     // an Linked-List anhängen
     list->publisher = publisher;
     pv_list_t *last = intercom.pvHead;
-    while (last) {
-        last = last->next;
+    if (last) {
+        while (last->next) {
+            last = last->next;
+        }
+        last->next = list;
+    } else { // erstes
+        intercom.pvHead = list;
     }
-    last->next = list;
 }
 
 static pv_t *intercom_pvSearch(QueueHandle_t publisher, uint32_t pvNum) {
