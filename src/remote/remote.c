@@ -230,6 +230,7 @@ HttpdBuiltInUrl builtInUrls[] = {
 
 bool remote_init(char* ssid, char* pw) {
     // Wlan starten
+    esp_log_level_set("efuse", ESP_LOG_INFO);
     if (remote_initWlan(ssid, pw)) return true;
     // Input Queue erstellen
     xRemote_input = xQueueCreate(32, sizeof(struct remote_input_t));
