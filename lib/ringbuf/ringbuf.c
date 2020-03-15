@@ -333,8 +333,8 @@ static void prvCopyItemByteBufRegister(Ringbuffer_t *pxRingbuffer, const uint8_t
     if (xRemLen < xItemSize) {
         //Copy as much as possible into remaining length
         for (size_t i = 0; i < xRemLen; ++i) {
-            ++pxRingbuffer->pucWrite;
             *(uint8_t*)pxRingbuffer->pucWrite = *(volatile uint8_t*)pucItem;
+            ++pxRingbuffer->pucWrite;
         }
         pxRingbuffer->xItemsWaiting += xRemLen;
         //Update item arguments to account for data already written
@@ -343,8 +343,8 @@ static void prvCopyItemByteBufRegister(Ringbuffer_t *pxRingbuffer, const uint8_t
     }
     //Copy all or remaining portion of the item
     for (size_t i = 0; i < xItemSize; ++i) {
-        ++pxRingbuffer->pucWrite;
         *(uint8_t*)pxRingbuffer->pucWrite = *(volatile uint8_t*)pucItem;
+        ++pxRingbuffer->pucWrite;
     }
     pxRingbuffer->xItemsWaiting += xItemSize;
 
