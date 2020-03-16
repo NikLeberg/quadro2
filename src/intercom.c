@@ -91,7 +91,7 @@ void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum) {
     command_list_t *node = intercom.commandHead;
     while (true) {
         if (!node) return NULL; // Owner nicht vorhanden
-        if (node->owner != owner) break;
+        if (node->owner == owner) break;
         node = node->next;
     }
     // Prüfen
@@ -99,6 +99,16 @@ void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum) {
     // Senden
     event_t event = {EVENT_COMMAND, (void*)commandNum};
     xQueueSendToBack(owner, &event, 0);
+}
+
+QueueHandle_t intercom_commandNumToOwner(uint32_t ownerNum) {
+    // Owner suchen
+    command_list_t *node = intercom.commandHead;
+    while (ownerNum--) {
+        if (!node) return NULL; // Owner nicht vorhanden
+        node = node->next;
+    }
+    return node->owner;
 }
 
 // sensors:00(setHome:00,resetFusion:01,setAltToGps:02,)
@@ -214,7 +224,7 @@ static parameter_t *intercom_parameterSearch(QueueHandle_t owner, uint32_t param
     parameter_list_t *node = intercom.parameterHead;
     while (true) {
         if (!node) return NULL; // Owner nicht vorhanden
-        if (node->owner != owner) break;
+        if (node->owner == owner) break;
         node = node->next;
     }
     // Prüfen
@@ -303,21 +313,27 @@ void intercom_pvRegister(QueueHandle_t publisher, pv_list_t *list) {
     }
 }
 
-static pv_t *intercom_pvSearch(QueueHandle_t publisher, uint32_t pvNum) {
+static pv_list_t *intercom_pvSearchPublisher(QueueHandle_t publisher) {
     // Publisher suchen
     pv_list_t *node = intercom.pvHead;
     while (true) {
         if (!node) return NULL; // Publisher nicht vorhanden
-        if (node->publisher != publisher) break;
+        if (node->publisher == publisher) break;
         node = node->next;
     }
+    return node;
+}
+
+static pv_t *intercom_pvSearchPv(QueueHandle_t publisher, uint32_t pvNum) {
+    // Publisher suchen
+    pv_list_t *node = intercom_pvSearchPublisher(publisher);
     // Prüfen
     if (node->length < pvNum) return NULL; // PV nicht vorhanden
     return &node->pvs[pvNum];
 }
 
 pv_t *intercom_pvSubscribe(QueueHandle_t subscriber, QueueHandle_t publisher, uint32_t pvNum) {
-    pv_t *pv = intercom_pvSearch(publisher, pvNum);
+    pv_t *pv = intercom_pvSearchPv(publisher, pvNum);
     if (!pv) return NULL;
     // Subscriber speichern
     for (uint8_t i = 0; i <= INTERCOM_PV_MAX_SUBSCRIBERS; ++i) {
@@ -329,9 +345,11 @@ pv_t *intercom_pvSubscribe(QueueHandle_t subscriber, QueueHandle_t publisher, ui
 }
 
 void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum, value_t value) {
-    pv_t *pv = intercom_pvSearch(publisher, pvNum);
+    pv_t *pv = intercom_pvSearchPv(publisher, pvNum);
     if (!pv) return;
     pv->value = value;
+    // Log
+    ESP_LOGD("intercom", "%s sendet: %s", intercom_pvSearchPublisher(publisher)->task, pv->name);
     // an alle Subscriber senden
     event_t event = {EVENT_PV, pv};
     for (uint8_t i = 0; i < INTERCOM_PV_MAX_SUBSCRIBERS; ++i) {

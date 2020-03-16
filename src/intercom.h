@@ -109,6 +109,7 @@ void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum);
 
 #define commandRegister(queue, commands)        intercom_commandRegister(queue, &(commands##_list))
 
+QueueHandle_t intercom_commandNumToOwner(uint32_t ownerNum);
 char* intercom_commandList();
 
 
@@ -244,7 +245,7 @@ void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum, value_t value);
 
 #define pvRegister(queue, pvs)      intercom_pvRegister(queue, &(pvs##_list))
 
-#define pvPublish(publisher, pvNum)             intercom_pvPublish(publisher, pvNum, (value_t)0);
+#define pvPublish(publisher, pvNum)             intercom_pvPublish(publisher, pvNum, (value_t)0)
 #define pvPublishUint(publisher, pvNum, value)  intercom_pvPublish(publisher, pvNum, (value_t){.ui = value})
 #define pvPublishInt(publisher, pvNum, value)   intercom_pvPublish(publisher, pvNum, (value_t){.i = value})
 #define pvPublishFloat(publisher, pvNum, value) intercom_pvPublish(publisher, pvNum, (value_t){.f = value})
