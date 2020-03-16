@@ -24,14 +24,13 @@ SemaphoreHandle_t sI2C;
 // Virtuelle Ressourcen
 /* keine */
 
-/** Sensorik **/
+// Sensorik
 QueueHandle_t xSensors;
 #define xSensors_PRIORITY (7U)
 
 // Remote
-TaskHandle_t xRemote_handle;
-#define xRemote_PRIORITY (5U)
-QueueHandle_t xRemote_input;
+QueueHandle_t xRemote;
+#define xRemote_PRIORITY (4U)
 
 // Info
 TaskHandle_t xInfo_handle;
