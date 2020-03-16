@@ -90,7 +90,7 @@ void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum) {
     // Owner suchen
     command_list_t *node = intercom.commandHead;
     while (true) {
-        if (!node) return NULL; // Owner nicht vorhanden
+        if (!node) return; // Owner nicht vorhanden
         if (node->owner == owner) break;
         node = node->next;
     }
@@ -99,48 +99,46 @@ void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum) {
     // Senden
     event_t event = {EVENT_COMMAND, (void*)commandNum};
     xQueueSendToBack(owner, &event, 0);
+    // Log
+    ESP_LOGD("intercom", "An '%s' wurde Befehl '%s' gesendet.", node->task, node->commands[commandNum].name);
 }
 
-QueueHandle_t intercom_commandNumToOwner(uint32_t ownerNum) {
+void intercom_commandSend2(uint32_t ownerNum, uint32_t commandNum) {
+    // Owner suchen
+    command_list_t *node = intercom.commandHead;
+    while (ownerNum--) {
+        if (!node) return; // Owner nicht vorhanden
+        node = node->next;
+    }
+    // Prüfen
+    if (node->length < commandNum) return; // Command nicht vorhanden
+    // Senden
+    event_t event = {EVENT_COMMAND, (void*)commandNum};
+    xQueueSendToBack(node->owner, &event, 0);
+    // Log
+    ESP_LOGD("intercom", "An '%s' wurde Befehl '%s' gesendet.", node->task, node->commands[commandNum].name);
+}
+
+char* intercom_commandOwnerName(uint32_t ownerNum) {
     // Owner suchen
     command_list_t *node = intercom.commandHead;
     while (ownerNum--) {
         if (!node) return NULL; // Owner nicht vorhanden
         node = node->next;
     }
-    return node->owner;
+    return node->task;
 }
 
-// sensors:00(setHome:00,resetFusion:01,setAltToGps:02,)
-char* intercom_commandList() {
-    // Grösse ermitteln
-    size_t strLen = 1; // '\0'
+char* intercom_commandCommandName(uint32_t ownerNum, uint32_t commandNum) {
+    // Owner suchen
     command_list_t *node = intercom.commandHead;
-    while (node) {
-        strLen += 5; // _:00(_)
-        strLen += strlen(node->task);
-        for (size_t i = 0; i < node->length; ++i) {
-            strLen += strlen(node->commands[i].name);
-            strLen += 4; // _:00,
-        }
+    while (ownerNum--) {
+        if (!node) return NULL; // Owner nicht vorhanden
         node = node->next;
     }
-    char *str = malloc(strLen);
-    // Zusammensetzen
-    FILE *f = fmemopen(str, strLen, "w");
-    size_t nodeCount = 0;
-    node = intercom.commandHead;
-    while (node) {
-        fprintf(f, "%s:%02d(", node->task, nodeCount);
-        for (size_t i = 0; i < node->length; ++i) {
-            fprintf(f, "%s:%02d,", node->commands[i].name, i);
-        }
-        fprintf(f, ")");
-        node = node->next;
-        ++nodeCount;
-    }
-    fclose(f);
-    return str;
+    // Prüfen
+    if (node->length < commandNum) return NULL; // Command nicht vorhanden
+    return node->commands[commandNum].name;
 }
 
 

@@ -105,12 +105,12 @@ typedef struct command_list_s {
 #define COMMAND_LIST(task, commands, length)    command_list_t commands##_list = {task, NULL, commands, length, NULL};
 
 void intercom_commandRegister(QueueHandle_t owner, command_list_t *list);
-void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum);
-
 #define commandRegister(queue, commands)        intercom_commandRegister(queue, &(commands##_list))
 
-QueueHandle_t intercom_commandNumToOwner(uint32_t ownerNum);
-char* intercom_commandList();
+void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum);
+void intercom_commandSend2(uint32_t ownerNum, uint32_t commandNum);
+char* intercom_commandOwnerName(uint32_t ownerNum);
+char* intercom_commandCommandName(uint32_t ownerNum, uint32_t commandNum);
 
 
 /*
