@@ -319,7 +319,7 @@ static void gps_interrupt(void* arg) {
                status & UART_RXFIFO_FULL_INT_ST_M || // rx-FIFO bald voll
                status & UART_RXFIFO_OVF_INT_ST_M) {  // rx-FIFO Überlauf
         // FIFO in Ringbuffer einlesen
-        xRingbufferSendFromISR(xGps, &uart->fifo.rw_byte, (uint32_t)uart->status.rxfifo_cnt, &woken);
+        xRingbufferSendFromISR(xGps, (const void *)&uart->fifo.rw_byte, (size_t)uart->status.rxfifo_cnt, &woken);
     } else if (status & UART_FRM_ERR_INT_ST_M) { // rx-Frame Error
         // FIFO zurücksetzen
         gps_uartRxFifoReset();
