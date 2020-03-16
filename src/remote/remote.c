@@ -24,55 +24,47 @@
 #include "esp_log.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
-// #define CONFIG_ESPHTTPD_BACKLOG_SUPPORT 1
 #include "esp.h" //libesphttpd
 #include "httpd.h"
 #include "httpd-freertos.h"
 #include "httpd-freertos.c"
 #include "cgiwebsocket.h"
 #include "route.h"
+#include "ringbuf.h"
+#include "tiny-json.h"
 
 
 /** Interne Abhängigkeiten **/
 
+#include "intercom.h"
 #include "resources.h"
 #include "remote.h"
 
 
 /** Variablendeklaration **/
 
-enum remote_input_type_t {
-    REMOTE_INPUT_CONNECTED = 0,
-    REMOTE_INPUT_DISCONNECTED,
-    REMOTE_INPUT_MESSAGE_RECEIVE,
-    REMOTE_INPUT_MESSAGE_SEND
-};
-
-struct remote_input_message_t {
-    char* data;
-    uint8_t length;
-    Websock *ws;
-    int64_t timestamp;
-};
-
-struct remote_input_t {
-    enum remote_input_type_t type;
-    union {
-        struct remote_input_message_t message;
-    };
-};
+typedef enum {
+    REMOTE_EVENT_WS_RECEIVE = 0,
+    REMOTE_EVENT_WS_SEND
+} remote_event_t;
 
 struct remote_t {
     HttpdFreertosInstance httpd;
     char httpdConn[sizeof(RtosConnType) * REMOTE_CONNECTION_COUNT];
+    RingbufHandle_t wsRxBuffer, wsTxBuffer;
+    json_t jsonBuffer[8];
 
     uint8_t connected;
     Websock *ws;
 
     vprintf_like_t defaultLog;
-    char disabledLogs[5];
+} remote;
+
+static pv_t remote_pvs[REMOTE_PV_MAX] = {
+    PV("connections", VALUE_TYPE_UINT),
+    PV("timeout", VALUE_TYPE_NONE)
 };
-static struct remote_t remote;
+static PV_LIST("remote", remote_pvs, REMOTE_PV_MAX);
 
 
 /** Private Functions **/
@@ -101,32 +93,45 @@ static bool remote_initWlan(char* ssid, char* pw);
 /*
  * WebSocket Nachrichtenlayout
  * ----------------------------
- * s - Status, r - Report, c - Control, l - Log
- * s: s? - Anfrage, s0 - Antwort nOk / Fatal, s1 - Antwort Ok, Ping/Pong-Mechanismus
- * r: ro - (Report-Orientation) roZahl,Zahl,Zahl, ra - (Report-Acceleration)
- * c: werden an control-Task weitergeleitet
- * l: umgeleitete ESP_LOG Strings
+ * Gesendete Nachrichten sind eine art relaxed JSON die per eval() in ein Objekt gewandelt werden:
+ *  var j = eval('([0,[...]])');
+ * Empfangene Nachrichten sind valides JSON die per cJSON geparst werden.
  * 
- * ToDo?: in Binary senden
+ * JSON Layout:
+ *  [ Nachrichtentyp, Daten der Nachricht (Text, Zahl oder JSON) ]
  */
+typedef enum {
+    REMOTE_MESSAGE_STATE = 1,   // Zahl, 0: Error, 1: Alles i.O.
+    REMOTE_MESSAGE_LOG,         // String mit Logtext
+    REMOTE_MESSAGE_COMMAND,     // JSON: [ Owner, Command ]
+    REMOTE_MESSAGE_SETTING,     // JSON: [ Owner, Setting, Wert ] -> mit Wert: Schreiben, ohne: Lesen
+    REMOTE_MESSAGE_PARAMETER,   // JSON: [ Owner, Parameter, Wert ] -> mit Wert: Schreiben, ohne: Lesen
+    REMOTE_MESSAGE_PV,          // JSON: [ Publisher, PV, Wert ] -> mit Wert: Publication, ohne: Subscribe
+    REMOTE_MESSAGE_COMMANDS,    // JSON: [ [ "owner", [ "command1", "command2", ... ] ], ... ]
+    REMOTE_MESSAGE_SETTINGS,    // JSON: [ [ "owner", [ "setting1", "setting2", ... ] ], ... ]
+    REMOTE_MESSAGE_PARAMETERS,  // JSON: [ [ "owner", [ "parameter1", "parameter2", ... ] ], ... ]
+    REMOTE_MESSAGE_PVS,         // JSON: [ [ "owner", [ "pv1", "pv2", ... ] ], ... ]
+} remote_message_type_t;
 
 /*
- * Function: remote_processMessage
+ * Function: remote_messageProcess
  * ----------------------------
  * Per Websocket empfangene Nachricht verarbeiten, weiterleiten.
  * 
- * struct remote_input_message_t *message: empfangene Message
+ * char *message: Nachricht
+ * size_t length: Länge der Nachricht
  */
-static void remote_processMessage(struct remote_input_message_t *message);
+static void remote_messageProcess(char *message, size_t length);
 
 /*
- * Function: remote_sendMessage
+ * Function: remote_messageSend
  * ----------------------------
- * Nachricht per WebSocket senden. Wenn message->ws == NULL, dann mittels Broadcast
+ * Nachricht per WebSocket senden. (nur an den letzten aktiven Websocket)
  * 
- * struct remote_input_message_t *message: zu sendende Message
+ * char *message: Nachricht
+ * size_t length: Länge der Nachricht
  */
-static void remote_sendMessage(struct remote_input_message_t *message);
+static void remote_messageSend(char *message, size_t length);
 
 
 /** Callbacks **/
@@ -232,10 +237,15 @@ bool remote_init(char* ssid, char* pw) {
     // Wlan starten
     esp_log_level_set("efuse", ESP_LOG_INFO);
     if (remote_initWlan(ssid, pw)) return true;
-    // Input Queue erstellen
-    xRemote_input = xQueueCreate(32, sizeof(struct remote_input_t));
+    // Intercom-Queue erstellen
+    xRemote = xQueueCreate(32, sizeof(event_t));
+    // an Intercom anbinden
+    pvRegister(xRemote, remote_pvs);
+    // Rx/Tx Ringbuffer erstellen
+    remote.wsRxBuffer = xRingbufferCreate(1 * 1024, RINGBUF_TYPE_NOSPLIT);
+    remote.wsTxBuffer = xRingbufferCreate(1 * 1024, RINGBUF_TYPE_NOSPLIT);
     // Task starten
-    if (xTaskCreate(&remote_task, "remote", 3 * 1024, NULL, xRemote_PRIORITY, &xRemote_handle) != pdTRUE) return true;
+    if (xTaskCreate(&remote_task, "remote", 3 * 1024, NULL, xRemote_PRIORITY, NULL) != pdTRUE) return true;
     // libesphttpd Bibliothek starten
 	if (httpdFreertosInit(&remote.httpd, builtInUrls, 80U, remote.httpdConn, REMOTE_CONNECTION_COUNT, HTTPD_FLAG_NONE)) return true;
 	if (httpdFreertosStart(&remote.httpd)) return true;
@@ -248,50 +258,53 @@ bool remote_init(char* ssid, char* pw) {
 
 void remote_task(void* arg) {
     // Variablen
-    struct remote_input_t input;
+    event_t event;
     bool timeoutPending = false;
-    int64_t lastContact = 0, now;
+    TickType_t lastContact = xTaskGetTickCount();
     // Loop
     while (true) {
-        if (xQueueReceive(xRemote_input, &input, 500 / portTICK_RATE_MS) == pdTRUE) {
-            switch (input.type) {
-                case REMOTE_INPUT_CONNECTED: {
-                    ++remote.connected;
-                    if (remote.connected == 1){}; // erste Verbindung, event propagieren ToDo
+        if (xQueueReceive(xRemote, &event, 500 / portTICK_RATE_MS) == pdTRUE) {
+            switch (event.type) {
+                case (EVENT_COMMAND): // keine Befehle
                     break;
-                }
-                case REMOTE_INPUT_DISCONNECTED: {
-                    --remote.connected;
-                    if (!remote.connected){}; // war letzte Verbindung, event propagieren ToDo
+                case (EVENT_PV): // keine Subscriptions
                     break;
-                }
-                case REMOTE_INPUT_MESSAGE_RECEIVE: {
-                    remote_processMessage(&input.message);
-                    free(input.message.data);
-                    lastContact = input.message.timestamp;
-                    timeoutPending = false;
-                    break;
-                }
-                case REMOTE_INPUT_MESSAGE_SEND: {
-                    remote_sendMessage(&input.message);
-                    free(input.message.data);
+                case (EVENT_INTERNAL): { // Daten in Rx / Tx Ringbuffer
+                    remote_event_t type = (remote_event_t)event.data;
+                    size_t length;
+                    char *message = NULL;
+                    if (type == REMOTE_EVENT_WS_RECEIVE) {
+                        message = xRingbufferReceive(remote.wsRxBuffer, &length, 0);
+                        if (message) {
+                            remote_messageProcess(message, length);
+                            lastContact = xTaskGetTickCount();
+                            timeoutPending = false;
+                            vRingbufferReturnItem(remote.wsRxBuffer, message);
+                        }
+                    } else if (type == REMOTE_EVENT_WS_SEND) {
+                        message = xRingbufferReceive(remote.wsTxBuffer, &length, 0);
+                        if (message) {
+                            remote_messageSend(message, length);
+                            vRingbufferReturnItem(remote.wsTxBuffer, message);
+                        }
+                    }
                     break;
                 }
                 default:
                     break;
             }
         }
-        // Timeout (0.5 s) erkennen
-        now = esp_timer_get_time();
-        if (remote.connected && (now - lastContact > 500000)) {
+        // Timeout erkennen
+        if (remote.connected && (xTaskGetTickCount() - lastContact > (REMOTE_TIMEOUT_MS / portTICK_PERIOD_MS))) {
             if (timeoutPending) { // Timeout fällig -> echter Timeout! -> Notstopp
-                // ToDo Event propagieren
-                ESP_LOGE("remote", "timeout!");
                 timeoutPending = false;
-            } else if (remote.ws) {
-                cgiWebsocketSend(&remote.httpd.httpdInstance, remote.ws,"s?", 2, WEBSOCK_FLAG_NONE);
+                pvPublish(xRemote, REMOTE_PV_TIMEOUT);
+            } else {
                 timeoutPending = true;
-                lastContact = now;
+                lastContact = xTaskGetTickCount();
+                char message[] = "[X]";
+                message[1] = REMOTE_MESSAGE_STATE + 48; // zu ASCII
+                remote_messageSend("message", sizeof(message));
             }
         }
     }
@@ -305,7 +318,7 @@ static esp_err_t remote_connectionEventHandler(void *ctx, system_event_t *event)
             break;
         case SYSTEM_EVENT_STA_GOT_IP: {
             uint32_t ip = event->event_info.got_ip.ip_info.ip.addr;
-            ESP_LOGD("remote", "IP - %u.%u.%u.%u", ip & 0xff, (ip >> 8) & 0xff, (ip >> 16) & 0xff, (ip >> 24));
+            ESP_LOGI("remote", "IP - %u.%u.%u.%u", ip & 0xff, (ip >> 8) & 0xff, (ip >> 16) & 0xff, (ip >> 24));
             break;
         }
         case SYSTEM_EVENT_STA_DISCONNECTED:
@@ -348,57 +361,68 @@ static bool remote_initWlan(char* ssid, char* pw) {
     return false;
 }
 
-static void remote_processMessage(struct remote_input_message_t *message) {
-    if (message->length < 1) return;
-    switch (*message->data) {
-        case 's': // Status
-            if (*(message->data+1) != '1') return; // ToDo: Notstopp, Fehler
-            break;
-        case 'c': // Control
-            // ToDo -> Weiterleiten an control
-            break;
-        case 'l': // Log
-            memset(remote.disabledLogs, 0, 5);
-            memcpy(remote.disabledLogs, (message->data + 1), message->length - 1);
-            break;
-        case 'e': // Einstellungen
-            break;
-        case 'r': // Report, wird vom Handy nicht verschickt
-        default:
-            break;
+static void remote_messageProcess(char *message, size_t length) {
+    const json_t *j = json_create(message, remote.jsonBuffer, sizeof(remote.jsonBuffer) / sizeof(json_t));
+    if (json_getType(j) == JSON_ARRAY) {
+        const json_t *jType = json_getChild(j);
+        if (json_getType(jType) == JSON_INTEGER) {
+            const json_t *jData = json_getSibling(jType);
+            switch (json_getInteger(jType)) {
+                case (REMOTE_MESSAGE_STATE):
+                    break;
+                case (REMOTE_MESSAGE_COMMAND): { // [owner, command]
+                    const json_t *jOwner = json_getChild(jData);
+                    const json_t *jCommand = json_getSibling(jOwner);
+                    if (json_getType(jOwner) == JSON_INTEGER && json_getType(jCommand) == JSON_INTEGER) {
+                        QueueHandle_t owner = intercom_commandNumToOwner(json_getInteger(jOwner));
+                        intercom_commandSend(owner, json_getInteger(jCommand));
+                    }
+                    break;
+                }
+                case (REMOTE_MESSAGE_SETTING): // [owner, setting, value]
+                    break;
+                case (REMOTE_MESSAGE_PARAMETER): // [owner, parameter, value]
+                    break;
+                case (REMOTE_MESSAGE_PV):
+                    break;
+                case (REMOTE_MESSAGE_COMMANDS):
+                    break;
+                case (REMOTE_MESSAGE_SETTINGS):
+                    break;
+                case (REMOTE_MESSAGE_PARAMETERS):
+                    break;
+                case (REMOTE_MESSAGE_PVS):
+                    break;
+                case (REMOTE_MESSAGE_LOG):
+                default:
+                    break;
+            }
+        }
     }
+    return;
 }
 
-static void remote_sendMessage(struct remote_input_message_t *message) {
-    if (remote.connected) {
-        if (message->ws) { // spezifischer WS
-            cgiWebsocketSend(&remote.httpd.httpdInstance, message->ws, message->data, message->length, WEBSOCK_FLAG_NONE);
-        } else if (remote.ws) { // letzter WS
-            if (cgiWebsocketSend(&remote.httpd.httpdInstance, remote.ws, message->data, message->length, WEBSOCK_FLAG_NONE) <= 0) {
-                remote.ws = NULL; // Sendefehler, Websocket inaktiv setzen
-            }
+static void remote_messageSend(char *message, size_t length) {
+    if (remote.connected && remote.ws) {
+        if (cgiWebsocketSend(&remote.httpd.httpdInstance, remote.ws, message, length, WEBSOCK_FLAG_NONE) <= 0) {
+            remote.ws = NULL; // Sendefehler, Websocket inaktiv setzen
         }
     }
 }
 
 static void remote_wsReceive(Websock *ws, char *data, int len, int flags) {
-    struct remote_input_t input;
-    input.type = REMOTE_INPUT_MESSAGE_RECEIVE;
-    input.message.ws = ws;
-    input.message.length = len;
-    input.message.data = (char*) malloc(len * sizeof(char));
-    memcpy(input.message.data, data, len);
-    input.message.timestamp = esp_timer_get_time();
-    xQueueSend(xRemote_input, &input, 0);
+    if (xRingbufferSend(remote.wsRxBuffer, data, len, 0) == pdTRUE) {
+        event_t event = {EVENT_INTERNAL, REMOTE_EVENT_WS_RECEIVE};
+        xQueueSendToBack(xRemote, &event, 0);
+    }
 }
 
 static void remote_wsConnect(Websock *ws) {
     // als aktiver ws speichern
     remote.ws = ws;
-    // Event melden
-	struct remote_input_t input;
-    input.type = REMOTE_INPUT_CONNECTED;
-    xQueueSend(xRemote_input, &input, 0);
+    ++remote.connected;
+    // Event publizieren
+    pvPublishUint(xRemote, REMOTE_PV_CONNECTIONS, remote.connected);
     // Callbacks registrieren
 	ws->recvCb = remote_wsReceive;
     ws->closeCb = remote_wsDisconnect;
@@ -409,29 +433,13 @@ static void remote_wsConnect(Websock *ws) {
 static void remote_wsDisconnect(Websock *ws) {
     // inaktiv setzen
     if (remote.ws == ws) remote.ws = NULL;
-    // Event melden
-	struct remote_input_t input;
-    input.type = REMOTE_INPUT_DISCONNECTED;
-    xQueueSend(xRemote_input, &input, 0);
+    --remote.connected;
+    // Event publizieren
+    pvPublishUint(xRemote, REMOTE_PV_CONNECTIONS, remote.connected);
 }
 
 inline bool remote_sendCommand(char *command, Websock *ws) {
-    char *string = (char*) malloc(128 * sizeof(char));
-    if (!string) return true;
-    int length = strlen(command) + 1;
-    if (length > 128) {
-        free(string);
-        return true;
-    }
-    string[0] = 'c';
-    strcpy(string + 1, command);
-    struct remote_input_t input;
-    input.type = REMOTE_INPUT_MESSAGE_SEND;
-    input.message.ws = ws;
-    input.message.length = length;
-    input.message.data = string;
-    input.message.timestamp = 0;
-    return (xQueueSend(xRemote_input, &input, 0) != pdTRUE);
+    return false;
 }
 
 CgiStatus remote_sendEmbedded(HttpdConnData *connData) {
@@ -464,26 +472,13 @@ CgiStatus remote_sendEmbedded(HttpdConnData *connData) {
 }
 
 int remote_printLog(const char * format, va_list arguments) {
-    for (uint8_t i = 0; i < 5; ++i) {
-        if (format[0] == remote.disabledLogs[i]) {
-            return remote.defaultLog(format, arguments);
-        }
-    }
-    char *string = (char*) malloc(128 * sizeof(char));
-    if (!string) return true;
-    int length = 0;
-    string[0] = 'l';
-    length = vsnprintf(string + 1, 127, format, arguments) + 1;
-    if (length <= 0 || length > 128) {
-        free(string);
-        return remote.defaultLog(format, arguments);
-    }
-    struct remote_input_t input;
-    input.type = REMOTE_INPUT_MESSAGE_SEND;
-    input.message.ws = NULL; // Broadcast
-    input.message.length = length;
-    input.message.data = string;
-    input.message.timestamp = 0;
-    xQueueSend(xRemote_input, &input, 0);
+    char buffer[128];
+    size_t length = 0;
+    FILE *f = fmemopen(buffer, sizeof(buffer), "w");
+    length += fprintf(f, "[%d,\"", REMOTE_MESSAGE_LOG);
+    length += vfprintf(f, format, arguments);
+    length += fprintf(f, "\"]");
+    fclose(f);
+    xRingbufferSend(remote.wsTxBuffer, buffer, length, 0);
     return remote.defaultLog(format, arguments);
 }
