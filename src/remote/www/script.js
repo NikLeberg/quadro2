@@ -8,9 +8,9 @@ function init() {
     ws = new WebSocket("ws:/" + window.location.hostname + "/ws");
     ws.onmessage = processMessage;
     ws.onclose = reconnect;
-    ws.timeout = setTimeout(function() {
-        ws.close(); // triggert onclose
-    }, 5000);
+    // ws.timeout = setTimeout(function() {
+    //     ws.close(); // triggert onclose
+    // }, 5000);
 }
 
 function reconnect() {
@@ -20,19 +20,24 @@ function reconnect() {
 }
 
 function processMessage(event) {
-    let message = event.data;
-    let type = message.charAt(0);
-    message = message.substr(1);
-    let functions = {
-        's' : sendStatus,
-        'c' : processControl,
-        'l' : writeLog,
-        'r' : displaySensors
-    };
-    if (functions.hasOwnProperty(type)) functions[type](message);
-    // Timeout
-    clearTimeout(ws.timeout);
-    ws.timeout = setTimeout(reconnect, 2000);
+    try {
+        let json = JSON.parse(event.data);
+        let functions = [
+            undefined,
+            gotStatus,
+            gotLog,
+            undefined,
+            undefined,
+            undefined,
+            gotPv
+        ];
+        functions[json[0]](json[1]);
+    } catch (e) {
+        // console.error(e);
+    }
+    // // Timeout
+    // clearTimeout(ws.timeout);
+    // ws.timeout = setTimeout(reconnect, 2000);
     // Status anzeigen
     displayConnectivity();
 }
@@ -65,15 +70,11 @@ function displayConnectivity() {
     e.innerHTML = spinner[e.innerHTML];
 }
 
-function sendStatus(message) {
-    ws.send("s1");
+function gotStatus(message) {
+    ws.send("[1,1]");
 }
 
-function processControl(message) {
-    ;
-}
-
-function writeLog(message) {
+function gotLog(message) {
     let filter = document.getElementsByName("logFilter")[0].value;
     if (!message.includes(filter)) return;
     let log = document.getElementById("log");
@@ -91,27 +92,13 @@ function writeLog(message) {
     log.prepend(line);
 }
 
-function displaySensors(message) {
-    ;
+function gotPv(pv) {
+    return;
 }
 
 function clearLog() {
     let log = document.getElementById("log");
     while (log.firstChild) {
         log.removeChild(log.firstChild);
-    }
-}
-
-function changeLog() {
-    let log = document.getElementById("logDiv");
-    let str = "l";
-    // Change senden
-    for (let box of log.querySelectorAll("input[type=checkbox")) {
-        str += box.checked ? "" : box.name;
-    }
-    ws.send(str);
-    // Einträge verstecken
-    for (let entry of log.querySelectorAll("pre")) {
-        entry.style.display = str.includes(entry.innerHTML[0]) ? "none" : "inherit";
     }
 }

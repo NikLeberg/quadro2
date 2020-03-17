@@ -302,9 +302,9 @@ void remote_task(void* arg) {
             } else {
                 timeoutPending = true;
                 lastContact = xTaskGetTickCount();
-                char message[] = "[X]";
+                char message[] = "[ ]";
                 message[1] = REMOTE_MESSAGE_STATE + 48; // zu ASCII
-                remote_messageSend("message", sizeof(message));
+                remote_messageSend(message, sizeof(message) - 1);
             }
         }
     }
@@ -362,21 +362,25 @@ static bool remote_initWlan(char* ssid, char* pw) {
 }
 
 static void remote_messageProcess(char *message, size_t length) {
+    message[length] = '\0';
     const json_t *j = json_create(message, remote.jsonBuffer, sizeof(remote.jsonBuffer) / sizeof(json_t));
-    if (json_getType(j) == JSON_ARRAY) {
+    if (j && json_getType(j) == JSON_ARRAY) {
         const json_t *jType = json_getChild(j);
-        if (json_getType(jType) == JSON_INTEGER) {
+        if (jType && json_getType(jType) == JSON_INTEGER) {
             const json_t *jData = json_getSibling(jType);
-            switch (json_getInteger(jType)) {
+            remote_message_type_t type = json_getInteger(jType);
+            switch (type) {
                 case (REMOTE_MESSAGE_STATE):
                     break;
                 case (REMOTE_MESSAGE_COMMAND): { // [owner, command]
-                    const json_t *jOwner = json_getChild(jData);
-                    const json_t *jCommand = json_getSibling(jOwner);
-                    if (json_getType(jOwner) == JSON_INTEGER && json_getType(jCommand) == JSON_INTEGER) {
-                        intercom_commandSend2(json_getInteger(jOwner), json_getInteger(jCommand));
+                    if (jData) {
+                        const json_t *jOwner = json_getChild(jData);
+                        const json_t *jCommand = (jOwner) ? json_getSibling(jOwner) : NULL;
+                        if (jCommand && json_getType(jOwner) == JSON_INTEGER && json_getType(jCommand) == JSON_INTEGER) {
+                            intercom_commandSend2(json_getInteger(jOwner), json_getInteger(jCommand));
+                        }
+                        break;
                     }
-                    break;
                 }
                 case (REMOTE_MESSAGE_SETTING): // [owner, setting, ?value]
                     break;
@@ -390,22 +394,27 @@ static void remote_messageProcess(char *message, size_t length) {
                         size_t length = 0;
                         FILE *f = fmemopen(buffer, sizeof(buffer), "w");
                         length += fprintf(f, "[%d,[", REMOTE_MESSAGE_COMMANDS);
-                        char *owner, *command;
+                        const char *owner, *command;
                         uint32_t i = 0, j = 0;
                         while (true) {
-                            owner = intercom_commandOwnerName(i++);
+                            owner = intercom_commandOwnerName(i);
                             if (!owner) break;
-                            length += fprintf(f, (i == 0) ? "[%s,[" : ",[%s,[", owner);
+                            length += fprintf(f, (i == 0) ? "[\"%s\",[" : ",[\"%s\",[", owner);
                             j = 0;
                             while (true) {
-                                command = intercom_commandCommandName(i, j++);
+                                command = intercom_commandCommandName(i, j);
                                 if (!command) break;
-                                length += fprintf(f, (j == 0) ? "%s" : ",%s", command);
+                                length += fprintf(f, (j == 0) ? "\"%s\"" : ",\"%s\"", command);
+                                j++;
                             }
-                            length += fputc(']', f);
+                            fputs("]]", f);
+                            length += 2;
+                            i++;
                         }
-                        length += fputc(']', f);
+                        fputs("]]", f);
+                        length += 2;
                         fclose(f);
+                        buffer[length] = '\0';
                         remote_messageSend(buffer, length);
                     }
                     break;
@@ -502,6 +511,10 @@ int remote_printLog(const char * format, va_list arguments) {
     length += vfprintf(f, format, arguments);
     length += fprintf(f, "\"]");
     fclose(f);
+    // RET entfernen
+    for (size_t i = 0; i <= length; ++i) {
+        if (buffer[i] == '\n') buffer[i] = ' ';
+    }
     if (xRingbufferSend(remote.wsTxBuffer, buffer, length, 0) == pdTRUE) {
         event_t event = {EVENT_INTERNAL, (void*)REMOTE_EVENT_WS_SEND};
         xQueueSendToBack(xRemote, &event, 0);
