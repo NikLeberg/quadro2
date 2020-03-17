@@ -95,7 +95,7 @@ void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum) {
         node = node->next;
     }
     // Prüfen
-    if (node->length < commandNum) return; // Command nicht vorhanden
+    if (commandNum >= node->length) return; // Command nicht vorhanden
     // Senden
     event_t event = {EVENT_COMMAND, (void*)commandNum};
     xQueueSendToBack(owner, &event, 0);
@@ -106,12 +106,13 @@ void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum) {
 void intercom_commandSend2(uint32_t ownerNum, uint32_t commandNum) {
     // Owner suchen
     command_list_t *node = intercom.commandHead;
+    if (!node) return;
     while (ownerNum--) {
-        if (!node) return; // Owner nicht vorhanden
         node = node->next;
+        if (!node) return; // Owner nicht vorhanden
     }
     // Prüfen
-    if (node->length < commandNum) return; // Command nicht vorhanden
+    if (commandNum >= node->length) return; // Command nicht vorhanden
     // Senden
     event_t event = {EVENT_COMMAND, (void*)commandNum};
     xQueueSendToBack(node->owner, &event, 0);
@@ -119,25 +120,27 @@ void intercom_commandSend2(uint32_t ownerNum, uint32_t commandNum) {
     ESP_LOGD("intercom", "An '%s' wurde Befehl '%s' gesendet.", node->task, node->commands[commandNum].name);
 }
 
-char* intercom_commandOwnerName(uint32_t ownerNum) {
+const char* intercom_commandOwnerName(uint32_t ownerNum) {
     // Owner suchen
     command_list_t *node = intercom.commandHead;
+    if (!node) return NULL;
     while (ownerNum--) {
-        if (!node) return NULL; // Owner nicht vorhanden
         node = node->next;
+        if (!node) return NULL; // Owner nicht vorhanden
     }
     return node->task;
 }
 
-char* intercom_commandCommandName(uint32_t ownerNum, uint32_t commandNum) {
+const char* intercom_commandCommandName(uint32_t ownerNum, uint32_t commandNum) {
     // Owner suchen
     command_list_t *node = intercom.commandHead;
+    if (!node) return NULL;
     while (ownerNum--) {
-        if (!node) return NULL; // Owner nicht vorhanden
         node = node->next;
+        if (!node) return NULL; // Owner nicht vorhanden
     }
     // Prüfen
-    if (node->length < commandNum) return NULL; // Command nicht vorhanden
+    if (commandNum >= node->length) return NULL; // Command nicht vorhanden
     return node->commands[commandNum].name;
 }
 
@@ -351,7 +354,7 @@ void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum, value_t value) 
     // an alle Subscriber senden
     event_t event = {EVENT_PV, pv};
     for (uint8_t i = 0; i < INTERCOM_PV_MAX_SUBSCRIBERS; ++i) {
-        if (pv->subscribers[i]) break;
+        if (!pv->subscribers[i]) break;
         xQueueSendToBack(pv->subscribers[i], &event, 0);
     }
 }

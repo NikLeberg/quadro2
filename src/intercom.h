@@ -109,8 +109,8 @@ void intercom_commandRegister(QueueHandle_t owner, command_list_t *list);
 
 void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum);
 void intercom_commandSend2(uint32_t ownerNum, uint32_t commandNum);
-char* intercom_commandOwnerName(uint32_t ownerNum);
-char* intercom_commandCommandName(uint32_t ownerNum, uint32_t commandNum);
+const char* intercom_commandOwnerName(uint32_t ownerNum);
+const char* intercom_commandCommandName(uint32_t ownerNum, uint32_t commandNum);
 
 
 /*
