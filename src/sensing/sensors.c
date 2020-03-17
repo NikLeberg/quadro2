@@ -246,11 +246,17 @@ static void sensors_processCommand(sensors_command_t command) {
     switch (command) {
         case (SENSORS_COMMAND_SET_HOME):
             // Altitude
-            sensors.homes.altitude = sensors.states[SENSORS_ALTIMETER]->vector.z;
+            if (sensors.states[SENSORS_ALTIMETER]) {
+                sensors.homes.altitude = sensors.states[SENSORS_ALTIMETER]->vector.z;
+            }
             // Ultraschall
-            sensors.homes.distance = sensors.states[SENSORS_ULTRASONIC]->vector.z;
+            if (sensors.states[SENSORS_ULTRASONIC]) {
+                sensors.homes.distance = sensors.states[SENSORS_ULTRASONIC]->vector.z;
+            }
             // Position
-            sensors.homes.position = sensors.states[SENSORS_POSITION]->vector;
+            if (sensors.states[SENSORS_POSITION]) {
+                sensors.homes.position = sensors.states[SENSORS_POSITION]->vector;
+            }
             // break; nach setHome immer auch Fusion zurücksetzen
         case (SENSORS_COMMAND_RESET_FUSION):
             sensors_fuseX_reset();
@@ -258,7 +264,9 @@ static void sensors_processCommand(sensors_command_t command) {
             sensors_fuseZ_reset();
             break;
         case (SENSORS_COMMAND_SET_ALTIMETER_TO_GPS):
-            sensors.homes.altitude += sensors.states[SENSORS_POSITION]->vector.z - sensors.states[SENSORS_ALTIMETER]->vector.z;
+            if (sensors.states[SENSORS_POSITION] && sensors.states[SENSORS_ALTIMETER]) {
+                sensors.homes.altitude += sensors.states[SENSORS_POSITION]->vector.z - sensors.states[SENSORS_ALTIMETER]->vector.z;
+            }
             break;
         default:
             break;
