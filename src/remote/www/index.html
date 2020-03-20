@@ -10,7 +10,12 @@
 <body>
 
     <h1>quadro2</h1>
-    <p id=ws style="font-family: monospace;">----------</p>
+    <p id=ws style="font-family: monospace;">-</p>
+    <div id="intercom">
+        <p>Befehle</p>
+        <form id="commands" onclick="commandClick(event);">
+        </form>
+    </div>
     <div id="logDiv">
         <p>Log</p>
         <input type="text" name="logFilter" placeholder="Filter für neue Logeinträge">

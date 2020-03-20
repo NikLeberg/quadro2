@@ -29,11 +29,15 @@ function processMessage(event) {
             undefined,
             undefined,
             undefined,
-            gotPv
+            gotPv,
+            gotCommandList,
+            gotSettingList,
+            gotParameterList,
+            gotPvList
         ];
         functions[json[0]](json[1]);
     } catch (e) {
-        // console.error(e);
+        console.error(e);
     }
     // // Timeout
     // clearTimeout(ws.timeout);
@@ -53,19 +57,10 @@ function displayConnectivity() {
     }, 100);
     let e = document.getElementById("ws");
     let spinner = {
-        '----------' : '+---------',
-        '+---------' : '#+--------',
-        '#+--------' : '+#+-------',
-        '+#+-------' : '-+#+------',
-        '-+#+------' : '--+#+-----',
-        '--+#+-----' : '---+#+----',
-        '---+#+----' : '----+#+---',
-        '----+#+---' : '-----+#+--',
-        '-----+#+--' : '------+#+-',
-        '------+#+-' : '-------+#+',
-        '-------+#+' : '--------+#',
-        '--------+#' : '---------+',
-        '---------+' : '----------'
+        '-' : '\\',
+        '\\' : '|',
+        '|' : '/',
+        '/' : '-',
     };
     e.innerHTML = spinner[e.innerHTML];
 }
@@ -93,11 +88,48 @@ function gotLog(message) {
 }
 
 function gotPv(pv) {
+    console.log(pv);
     return;
 }
 
+NodeList.prototype.indexOf = Array.prototype.indexOf;
+let $ = (s,o = document) => o.querySelectorAll(s);
+
+function gotCommandList(commands) {
+    let f = $("#commands")[0];
+    while (f.firstChild) {
+        f.removeChild(f.firstChild);
+    }
+    for (let node of commands) {
+        let set = document.createElement("fieldset");
+        set.innerHTML = "<legend>" + node[0] + "</legend>";
+        for (let element of node[1]) {
+            set.innerHTML += "<input type='button' value='" + element + "'> ";
+        }
+        f.appendChild(set);
+    }
+}
+
+function gotSettingList(setting) {
+    gotCommandList(setting);
+}
+function gotParameterList(parameter) {
+    gotCommandList(parameter);
+}
+function gotPvList(pv) {
+    gotCommandList(pv);
+}
+
+function commandClick(event) {
+    let t = event.target;
+    let p = t.parentNode;
+    let n = $("fieldset", t.form).indexOf(p);
+    let e = $("input", p).indexOf(t);
+    ws.send("[3,[" + n + "," + e + "]]");
+}
+
 function clearLog() {
-    let log = document.getElementById("log");
+    let log = $("#log")[0];
     while (log.firstChild) {
         log.removeChild(log.firstChild);
     }

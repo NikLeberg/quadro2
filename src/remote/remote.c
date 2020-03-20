@@ -114,6 +114,15 @@ typedef enum {
 } remote_message_type_t;
 
 /*
+ * Function: remote_pvForward
+ * ----------------------------
+ * Leitet per Intercom empfangene Prozessvariabel-Events per WebSocket weiter.
+ * 
+ * pv_t *pv: empfangener pv
+ */
+static void remote_pvForward(pv_t *pv);
+
+/*
  * Function: remote_messageProcess
  * ----------------------------
  * Per Websocket empfangene Nachricht verarbeiten, weiterleiten.
@@ -122,6 +131,26 @@ typedef enum {
  * size_t length: Länge der Nachricht
  */
 static void remote_messageProcess(char *message, size_t length);
+
+/*
+ * Function: remote_intercomGetSet
+ * ----------------------------
+ * Interpretiere JSON Anfragen für Einstellungen und Parameter.
+ * Schreiben & Lesen oder nur Lesen.
+ * 
+ * remote_message_type_t type: Typ der Liste (siehe intercom.h)
+ * json_t *jData: empfangene JSON Antwort
+ */
+static void remote_intercomGetSet(remote_message_type_t type, const json_t *jData);
+
+/*
+ * Function: remote_intercomListSend
+ * ----------------------------
+ * Baue und sende JSON Array von intercom spezifischen Listen je nach typ.
+ * 
+ * remote_message_type_t type: Typ der Liste (siehe intercom.h)
+ */
+static void remote_intercomListSend(remote_message_type_t type);
 
 /*
  * Function: remote_messageSend
@@ -267,7 +296,8 @@ void remote_task(void* arg) {
             switch (event.type) {
                 case (EVENT_COMMAND): // keine Befehle
                     break;
-                case (EVENT_PV): // keine Subscriptions
+                case (EVENT_PV): // weiterleiten
+                    remote_pvForward((pv_t*)event.data);
                     break;
                 case (EVENT_INTERNAL): { // Daten in Rx / Tx Ringbuffer
                     remote_event_t type = (remote_event_t)event.data;
@@ -361,8 +391,34 @@ static bool remote_initWlan(char* ssid, char* pw) {
     return false;
 }
 
+static void remote_pvForward(pv_t *pv) {
+    uint32_t subscriberNum, pvNum;
+    if (intercom_pvIndex(pv, &subscriberNum, &pvNum)) return;
+    char buffer[32];
+    size_t length;
+    switch (pv->type) {
+        case (VALUE_TYPE_NONE):
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%d,%d,%d,true]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_NONE);
+            break;
+        case (VALUE_TYPE_UINT):
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%d,%d,%d,%d]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_UINT, pv->value.ui);
+            break;
+        case (VALUE_TYPE_INT):
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%d,%d,%d,%d]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_INT, pv->value.i);
+            break;
+        case (VALUE_TYPE_FLOAT):
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%d,%d,%d,%.9g]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_FLOAT, pv->value.f);
+            break;
+        default:
+            return;
+    }
+    if (length > 0 && length < sizeof(buffer)) {
+        remote_messageSend(buffer, length);
+    }
+}
+
 static void remote_messageProcess(char *message, size_t length) {
-    message[length] = '\0';
+    message[length] = '\0'; // Fixme!
     const json_t *j = json_create(message, remote.jsonBuffer, sizeof(remote.jsonBuffer) / sizeof(json_t));
     if (j && json_getType(j) == JSON_ARRAY) {
         const json_t *jType = json_getChild(j);
@@ -372,60 +428,39 @@ static void remote_messageProcess(char *message, size_t length) {
             switch (type) {
                 case (REMOTE_MESSAGE_STATE):
                     break;
+                case (REMOTE_MESSAGE_LOG):
+                    break;
                 case (REMOTE_MESSAGE_COMMAND): { // [owner, command]
                     if (jData) {
                         const json_t *jOwner = json_getChild(jData);
                         const json_t *jCommand = (jOwner) ? json_getSibling(jOwner) : NULL;
-                        if (jCommand && json_getType(jOwner) == JSON_INTEGER && json_getType(jCommand) == JSON_INTEGER) {
+                        if (jCommand && json_getType(jOwner) == JSON_INTEGER && json_getType(jCommand) == JSON_INTEGER) { // valid
                             intercom_commandSend2(json_getInteger(jOwner), json_getInteger(jCommand));
                         }
-                        break;
                     }
+                    break;
                 }
-                case (REMOTE_MESSAGE_SETTING): // [owner, setting, ?value]
+                case (REMOTE_MESSAGE_SETTING): // [owner, setting, ?value] - get / set
+                case (REMOTE_MESSAGE_PARAMETER): // [owner, parameter, ?value] - get / set
+                    if (jData) remote_intercomGetSet(type, jData);
                     break;
-                case (REMOTE_MESSAGE_PARAMETER): // [owner, parameter, ?value]
-                    break;
-                case (REMOTE_MESSAGE_PV):
-                    break;
-                case (REMOTE_MESSAGE_COMMANDS): {
-                    if (!jData) {
-                        char buffer[1024];
-                        size_t length = 0;
-                        FILE *f = fmemopen(buffer, sizeof(buffer), "w");
-                        length += fprintf(f, "[%d,[", REMOTE_MESSAGE_COMMANDS);
-                        const char *owner, *command;
-                        uint32_t i = 0, j = 0;
-                        while (true) {
-                            owner = intercom_commandOwnerName(i);
-                            if (!owner) break;
-                            length += fprintf(f, (i == 0) ? "[\"%s\",[" : ",[\"%s\",[", owner);
-                            j = 0;
-                            while (true) {
-                                command = intercom_commandCommandName(i, j);
-                                if (!command) break;
-                                length += fprintf(f, (j == 0) ? "\"%s\"" : ",\"%s\"", command);
-                                j++;
-                            }
-                            fputs("]]", f);
-                            length += 2;
-                            i++;
+                case (REMOTE_MESSAGE_PV): { // [publisher, pv] - subscribe
+                    if (jData) {
+                        const json_t *jPublisher = json_getChild(jData);
+                        const json_t *jPv = (jPublisher) ? json_getSibling(jPublisher) : NULL;
+                        if (jPv && json_getType(jPublisher) == JSON_INTEGER && json_getType(jPv) == JSON_INTEGER) { // valid
+                            intercom_pvSubscribe2(xRemote, json_getInteger(jPublisher), json_getInteger(jPv));
                         }
-                        fputs("]]", f);
-                        length += 2;
-                        fclose(f);
-                        buffer[length] = '\0';
-                        remote_messageSend(buffer, length);
                     }
                     break;
+                    break;
                 }
+                case (REMOTE_MESSAGE_COMMANDS): // [type] - lade Liste
                 case (REMOTE_MESSAGE_SETTINGS):
-                    break;
                 case (REMOTE_MESSAGE_PARAMETERS):
-                    break;
                 case (REMOTE_MESSAGE_PVS):
+                    if (!jData) remote_intercomListSend(type);
                     break;
-                case (REMOTE_MESSAGE_LOG):
                 default:
                     break;
             }
@@ -434,9 +469,112 @@ static void remote_messageProcess(char *message, size_t length) {
     return;
 }
 
+typedef value_type_t (*typeFunc_t)(uint32_t, uint32_t);
+typedef bool (*getFunc_t)(uint32_t, uint32_t, value_t*);
+typedef bool (*setFunc_t)(uint32_t, uint32_t, value_t*);
+
+static void remote_intercomGetSet(remote_message_type_t type, const json_t *jData) {
+    // Funktionen auswählen
+    typeFunc_t typeFunc;
+    getFunc_t getFunc;
+    setFunc_t setFunc;
+    switch (type) {
+        case (REMOTE_MESSAGE_SETTING):
+            typeFunc = &intercom_settingType2;
+            getFunc = &intercom_settingGet2;
+            setFunc = &intercom_settingSet2;
+            break;
+        case (REMOTE_MESSAGE_PARAMETER):
+            typeFunc = &intercom_parameterType2;
+            getFunc = &intercom_parameterGet2;
+            setFunc = &intercom_parameterSet2;
+            break;
+        default:
+            return;
+    }
+    const json_t *jNode = json_getChild(jData);
+    const json_t *jElement = (jNode) ? json_getSibling(jNode) : NULL;
+    const json_t *jValue = (jElement) ? json_getSibling(jElement) : NULL;
+    if (jElement && json_getType(jNode) == JSON_INTEGER && json_getType(jElement) == JSON_INTEGER) { // valid
+        uint32_t node = json_getInteger(jNode);
+        uint32_t element = json_getInteger(jElement);
+        value_type_t valueType = typeFunc(node, element);
+        value_t value;
+        if (jValue) { // set
+            if (valueType == VALUE_TYPE_UINT) value.ui = json_getInteger(jValue);
+            else if (valueType == VALUE_TYPE_INT) value.i = json_getInteger(jValue);
+            else if (valueType == VALUE_TYPE_FLOAT) value.f = json_getReal(jValue);
+            else return;
+            setFunc(node, element, &value);
+        } // get (auch immer nach set)
+        getFunc(node, element, &value);
+        char buffer[32];
+        size_t length;
+        if (valueType == VALUE_TYPE_UINT) {
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%d,%d,%d,%d]]", type, node, element, valueType, value.ui);
+        } else if (valueType == VALUE_TYPE_INT) {
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%d,%d,%d,%d]]", type, node, element, valueType, value.i);
+        } else if (valueType == VALUE_TYPE_FLOAT) {
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%d,%d,%d,%.9g]]", type, node, element, valueType, value.f);
+        } else return;
+        if (length > 0 && length <= sizeof(buffer)) {
+            remote_messageSend(buffer, length);
+        }
+    }
+}
+
+typedef const char* (*nameNodeFunc_t)(uint32_t);
+typedef const char* (*nameElementFunc_t)(uint32_t, uint32_t);
+
+static void remote_intercomListSend(remote_message_type_t type) {
+    // Funktionen auswählen
+    nameNodeFunc_t node;
+    nameElementFunc_t element;
+    switch (type) {
+        case (REMOTE_MESSAGE_COMMANDS):
+            node = &intercom_commandNameOwner;
+            element = &intercom_commandNameCommand;
+            break;
+        case (REMOTE_MESSAGE_SETTINGS):
+            node = &intercom_settingNameOwner;
+            element = &intercom_settingNameSetting;
+            break;
+        case (REMOTE_MESSAGE_PARAMETERS):
+            node = &intercom_parameterNameOwner;
+            element = &intercom_parameterNameParameter;
+            break;
+        case (REMOTE_MESSAGE_PVS):
+            node = &intercom_pvNamePublisher;
+            element = &intercom_pvNamePv;
+            break;
+        default:
+            return;
+    }
+    // JSON bauen
+    char buffer[1024];
+    FILE *f = fmemopen(buffer, sizeof(buffer), "w");
+    fprintf(f, "[%d,[", type);
+    const char *nodeName, *elementName;
+    for (uint32_t i = 0; ; ++i) {
+        nodeName = node(i);
+        if (!nodeName) break;
+        fprintf(f, (i == 0) ? "[\"%s\",[" : ",[\"%s\",[", nodeName);
+        for (uint32_t j = 0; ; ++j) {
+            elementName = element(i, j);
+            if (!elementName) break;
+            fprintf(f, (j == 0) ? "\"%s\"" : ",\"%s\"", elementName);
+        }
+        fputs("]]", f);
+    }
+    fputs("]]", f);
+    remote_messageSend(buffer, ftell(f));
+    fclose(f);
+}
+
 static void remote_messageSend(char *message, size_t length) {
     if (remote.connected && remote.ws) {
         if (cgiWebsocketSend(&remote.httpd.httpdInstance, remote.ws, message, length, WEBSOCK_FLAG_NONE) <= 0) {
+            cgiWebsocketClose(&remote.httpd.httpdInstance, remote.ws, 1011); // Beende mit "Internal Error"
             remote.ws = NULL; // Sendefehler, Websocket inaktiv setzen
         }
     }
@@ -453,13 +591,13 @@ static void remote_wsConnect(Websock *ws) {
     // als aktiver ws speichern
     remote.ws = ws;
     ++remote.connected;
-    // Event publizieren
-    pvPublishUint(xRemote, REMOTE_PV_CONNECTIONS, remote.connected);
     // Callbacks registrieren
 	ws->recvCb = remote_wsReceive;
     ws->closeCb = remote_wsDisconnect;
     // Hallo senden
 	cgiWebsocketSend(&remote.httpd.httpdInstance, ws, "quadro2", 7, WEBSOCK_FLAG_NONE);
+    // Event publizieren
+    pvPublishUint(xRemote, REMOTE_PV_CONNECTIONS, remote.connected);
 }
 
 static void remote_wsDisconnect(Websock *ws) {
@@ -468,10 +606,6 @@ static void remote_wsDisconnect(Websock *ws) {
     --remote.connected;
     // Event publizieren
     pvPublishUint(xRemote, REMOTE_PV_CONNECTIONS, remote.connected);
-}
-
-inline bool remote_sendCommand(char *command, Websock *ws) {
-    return false;
 }
 
 CgiStatus remote_sendEmbedded(HttpdConnData *connData) {
