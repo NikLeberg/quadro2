@@ -54,26 +54,26 @@
 
 #define ERROR(value) (value / 2.0f) * (value / 2.0f)
 
-// Z Sensorfehler
-#define SENSORS_FUSE_Z_ERROR_ACCELERATION   ERROR(0.35f)    // +/- 0.35 m/s2
-#define SENSORS_FUSE_Z_ERROR_ULTRASONIC     ERROR(0.005f)   // +/- 5 mm
-#define SENSORS_FUSE_Z_ERROR_BAROMETER      ERROR(0.3f)     // +/- 30 cm
-#define SENSORS_FUSE_Z_ERROR_GPS            ERROR(1.0f)     // +/- 1 m
-// Z Limits
-#define SENSORS_FUSE_Z_LIMIT_VEL            100.0f          // +/- 100 m/s
+// // Z Sensorfehler
+// #define SENSORS_FUSE_Z_ERROR_ACCELERATION   ERROR(0.35f)    // +/- 0.35 m/s2
+// #define SENSORS_FUSE_Z_ERROR_ULTRASONIC     ERROR(0.005f)   // +/- 5 mm
+// #define SENSORS_FUSE_Z_ERROR_BAROMETER      ERROR(0.3f)     // +/- 30 cm
+// #define SENSORS_FUSE_Z_ERROR_GPS            ERROR(1.0f)     // +/- 1 m
+// // Z Limits
+// #define SENSORS_FUSE_Z_LIMIT_VEL            100.0f          // +/- 100 m/s
 
-// Y Sensorfehler
-#define SENSORS_FUSE_Y_ERROR_ACCELERATION   ERROR(0.35f)    // +/- 0.35 m/s2
-#define SENSORS_FUSE_Y_ERROR_GPS            ERROR(0.5f)     // +/- 1 m
-#define SENSORS_FUSE_Y_ERROR_VELOCITY       ERROR(1.0f)     // +/- 1 m/s
-// Y Limits
-#define SENSORS_FUSE_Y_LIMIT_VEL            100.0f          // +/- 100 m/s
+// // Y Sensorfehler
+// #define SENSORS_FUSE_Y_ERROR_ACCELERATION   ERROR(0.35f)    // +/- 0.35 m/s2
+// #define SENSORS_FUSE_Y_ERROR_GPS            ERROR(0.5f)     // +/- 1 m
+// #define SENSORS_FUSE_Y_ERROR_VELOCITY       ERROR(1.0f)     // +/- 1 m/s
+// // Y Limits
+// #define SENSORS_FUSE_Y_LIMIT_VEL            100.0f          // +/- 100 m/s
 
-// X Sensorfehler
-#define SENSORS_FUSE_X_ERROR_ACCELERATION   ERROR(0.35f)    // +/- 0.35 m/s2
-#define SENSORS_FUSE_X_ERROR_GPS            ERROR(0.5f)     // +/- 1 m
-// X Limits
-#define SENSORS_FUSE_X_LIMIT_VEL            100.0f          // +/- 100 m/s
+// // X Sensorfehler
+// #define SENSORS_FUSE_X_ERROR_ACCELERATION   ERROR(0.35f)    // +/- 0.35 m/s2
+// #define SENSORS_FUSE_X_ERROR_GPS            ERROR(0.5f)     // +/- 1 m
+// // X Limits
+// #define SENSORS_FUSE_X_LIMIT_VEL            100.0f          // +/- 100 m/s
 
 
 /** Befehle **/
@@ -116,8 +116,11 @@ typedef enum {
 
 typedef enum {
     SENSORS_PV_X = 0,
+    SENSORS_PV_VX,
     SENSORS_PV_Y,
+    SENSORS_PV_VY,
     SENSORS_PV_Z,
+    SENSORS_PV_VZ,
     SENSORS_PV_MAX
 } sensors_pv_t;
 

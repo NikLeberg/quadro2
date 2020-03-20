@@ -127,8 +127,11 @@ static SETTING_LIST("sensors", sensors_settings, SENSORS_SETTING_MAX);
 
 static pv_t sensors_pvs[SENSORS_PV_MAX] = {
     PV("x", VALUE_TYPE_FLOAT),
+    PV("vx", VALUE_TYPE_FLOAT),
     PV("y", VALUE_TYPE_FLOAT),
+    PV("vy", VALUE_TYPE_FLOAT),
     PV("z", VALUE_TYPE_FLOAT),
+    PV("vz", VALUE_TYPE_FLOAT),
 };
 static PV_LIST("sensors", sensors_pvs, SENSORS_PV_MAX);
 
@@ -280,37 +283,37 @@ static void sensors_processData(sensors_event_t *event) {
     // Verarbeiten
     switch (event->type) {
         case (SENSORS_ACCELERATION):
-            ESP_LOGI("sensors", "%llu,A,%f,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->vector.z, event->accuracy);
-            // sensors_fuseX(event->type, event->vector.x, event->timestamp);
-            // sensors_fuseY(event->type, event->vector.y, event->timestamp);
-            // sensors_fuseZ(event->type, event->vector.z, event->timestamp);
+            // ESP_LOGI("sensors", "%llu,A,%f,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->vector.z, event->accuracy);
+            sensors_fuseX(event->type, event->vector.x, event->timestamp);
+            sensors_fuseY(event->type, event->vector.y, event->timestamp);
+            sensors_fuseZ(event->type, event->vector.z, event->timestamp);
             break;
         case (SENSORS_ORIENTATION):
-            ESP_LOGI("sensors", "%llu,O,%f,%f,%f,%f,%f", event->timestamp, event->orientation.i, event->orientation.j, event->orientation.k, event->orientation.real, event->accuracy);
+            // ESP_LOGI("sensors", "%llu,O,%f,%f,%f,%f,%f", event->timestamp, event->orientation.i, event->orientation.j, event->orientation.k, event->orientation.real, event->accuracy);
             break;
         case (SENSORS_ALTIMETER):
             event->vector.z -= sensors.homes.altitude;
-            ESP_LOGI("sensors", "%llu,B,%f,%f", event->timestamp, event->vector.z, event->accuracy);
-            // sensors_fuseZ(event->type, event->distance, event->timestamp);
+            // ESP_LOGI("sensors", "%llu,B,%f,%f", event->timestamp, event->vector.z, event->accuracy);
+            sensors_fuseZ(event->type, event->vector.z, event->timestamp);
             break;
         case (SENSORS_ULTRASONIC):
             event->vector.z -= sensors.homes.distance;
             ESP_LOGI("sensors", "%llu,U,%f", event->timestamp, event->vector.z);
-            // sensors_fuseZ(event->type, event->distance, event->timestamp);
+            sensors_fuseZ(event->type, event->vector.z, event->timestamp);
             break;
         case (SENSORS_POSITION):
             event->vector.x -= sensors.homes.position.x;
             event->vector.y -= sensors.homes.position.y;
             event->vector.z -= sensors.homes.position.z;
-            ESP_LOGI("sensors", "%llu,P,%f,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->vector.z, event->accuracy);
-            // sensors_fuseX(event->type, event->vector.x, event->timestamp);
-            // sensors_fuseY(event->type, event->vector.y, event->timestamp);
-            // sensors_fuseZ(event->type, event->vector.z, event->timestamp);
+            // ESP_LOGI("sensors", "%llu,P,%f,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->vector.z, event->accuracy);
+            sensors_fuseX(event->type, event->vector.x, event->timestamp);
+            sensors_fuseY(event->type, event->vector.y, event->timestamp);
+            sensors_fuseZ(event->type, event->vector.z, event->timestamp);
             break;
         case (SENSORS_GROUNDSPEED):
-            ESP_LOGI("sensors", "%llu,S,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->accuracy);
-            // sensors_fuseX(event->type, event->vector.x, event->timestamp);
-            // sensors_fuseY(event->type, event->vector.y, event->timestamp);
+            // ESP_LOGI("sensors", "%llu,S,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->accuracy);
+            sensors_fuseX(event->type, event->vector.x, event->timestamp);
+            sensors_fuseY(event->type, event->vector.y, event->timestamp);
             // sensors_fuseZ(event->type, event->vector.z, event->timestamp);
             break;
         default:
@@ -349,7 +352,7 @@ static void sensors_fuseZ(sensors_event_type_t type, float z, int64_t timestamp)
         // Input
         EEKF_DECL_MAT_INIT(u, 1, 1, z);
         // Unsicherheit der Voraussage
-        z = fabsf(z) + SENSORS_FUSE_Z_ERROR_ACCELERATION;
+        z = fabsf(z) + sensors.Z.errorAcceleration;
         EEKF_DECL_MAT(Q, 2, 2);
         *EEKF_MAT_EL(Q, 0, 0) = 0.25f * z * powf(dt, 4.0f);
         *EEKF_MAT_EL(Q, 0, 1) = 0.5f * z * powf(dt, 3.0f);
@@ -368,15 +371,15 @@ static void sensors_fuseZ(sensors_event_type_t type, float z, int64_t timestamp)
         switch (type) {
             case (SENSORS_ULTRASONIC):
                 *EEKF_MAT_EL(sensors.Z.z, 0, 0) = z;
-                *EEKF_MAT_EL(R, 0, 0) = SENSORS_FUSE_Z_ERROR_ULTRASONIC;
+                *EEKF_MAT_EL(R, 0, 0) = sensors.Z.errorUltrasonic;
                 break;
             case (SENSORS_ALTIMETER):
                 *EEKF_MAT_EL(sensors.Z.z, 1, 0) = z;
-                *EEKF_MAT_EL(R, 1, 1) = SENSORS_FUSE_Z_ERROR_BAROMETER;
+                *EEKF_MAT_EL(R, 1, 1) = sensors.Z.errorBarometer;
                 break;
             case (SENSORS_POSITION):
                 *EEKF_MAT_EL(sensors.Z.z, 2, 0) = z;
-                *EEKF_MAT_EL(R, 2, 2) = SENSORS_FUSE_Z_ERROR_GPS;
+                *EEKF_MAT_EL(R, 2, 2) = sensors.Z.errorGPS;
             default:
                 return; // unbekannter Sensortyp
         }
@@ -388,7 +391,10 @@ static void sensors_fuseZ(sensors_event_type_t type, float z, int64_t timestamp)
         }
     }
     // DEBUG
-    ESP_LOGD("sensors", "Fz,%f,%f,Z,%f,%f,%f", *EEKF_MAT_EL(sensors.Z.x, 0, 0), *EEKF_MAT_EL(sensors.Z.x, 1, 0), *EEKF_MAT_EL(sensors.Z.z, 0, 0), *EEKF_MAT_EL(sensors.Z.z, 1, 0), *EEKF_MAT_EL(sensors.Z.z, 2, 0));
+    //ESP_LOGD("sensors", "Fz,%f,%f,Z,%f,%f,%f", *EEKF_MAT_EL(sensors.Z.x, 0, 0), *EEKF_MAT_EL(sensors.Z.x, 1, 0), *EEKF_MAT_EL(sensors.Z.z, 0, 0), *EEKF_MAT_EL(sensors.Z.z, 1, 0), *EEKF_MAT_EL(sensors.Z.z, 2, 0));
+    // Publish
+    //pvPublishFloat(xSensors, SENSORS_PV_Z, *EEKF_MAT_EL(sensors.Z.x, 0, 0));
+    //pvPublishFloat(xSensors, SENSORS_PV_VZ, *EEKF_MAT_EL(sensors.Z.x, 1, 0));
 }
 
 eekf_return sensors_fuseZ_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const *x,
@@ -409,8 +415,8 @@ eekf_return sensors_fuseZ_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const 
     if (NULL == eekf_mat_add(xp, xp, eekf_mat_mul(&gu, &G, u))) return eEekfReturnComputationFailed;
     // Limits einhalten
     float *predictedVelocity = EEKF_MAT_EL(*xp, 1, 0);
-    if (*predictedVelocity > SENSORS_FUSE_Z_LIMIT_VEL) *predictedVelocity = SENSORS_FUSE_Z_LIMIT_VEL;
-    else if (*predictedVelocity < -SENSORS_FUSE_Z_LIMIT_VEL) *predictedVelocity = -SENSORS_FUSE_Z_LIMIT_VEL;
+    if (*predictedVelocity > sensors.Z.limitVelocity) *predictedVelocity = sensors.Z.limitVelocity;
+    else if (*predictedVelocity < -sensors.Z.limitVelocity) *predictedVelocity = -sensors.Z.limitVelocity;
     return eEekfReturnOk;
 }
 
@@ -465,7 +471,7 @@ static void sensors_fuseY(sensors_event_type_t type, float y, int64_t timestamp)
         // Input
         EEKF_DECL_MAT_INIT(u, 1, 1, y);
         // Unsicherheit der Voraussage
-        y = fabsf(y) + SENSORS_FUSE_Y_ERROR_ACCELERATION;
+        y = fabsf(y) + sensors.Y.errorAcceleration;
         EEKF_DECL_MAT(Q, 2, 2);
         *EEKF_MAT_EL(Q, 0, 0) = 0.25f * y * powf(dt, 4.0f);
         *EEKF_MAT_EL(Q, 0, 1) = 0.5f * y * powf(dt, 3.0f);
@@ -484,10 +490,10 @@ static void sensors_fuseY(sensors_event_type_t type, float y, int64_t timestamp)
         switch (type) {
             case (SENSORS_POSITION):
                 *EEKF_MAT_EL(sensors.Y.z, 0, 0) = y;
-                *EEKF_MAT_EL(R, 0, 0) = SENSORS_FUSE_Y_ERROR_GPS;
+                *EEKF_MAT_EL(R, 0, 0) = sensors.Y.errorGPS;
             case (SENSORS_GROUNDSPEED):
                 *EEKF_MAT_EL(sensors.Y.z, 1, 0) = y;
-                *EEKF_MAT_EL(R, 1, 1) = SENSORS_FUSE_Y_ERROR_VELOCITY;
+                *EEKF_MAT_EL(R, 1, 1) = sensors.Y.errorVelocity;
             default:
                 return; // unbekannter Sensortyp
         }
@@ -499,7 +505,10 @@ static void sensors_fuseY(sensors_event_type_t type, float y, int64_t timestamp)
         }
     }
     // DEBUG
-    ESP_LOGD("sensors", "Fy,%f,%f,Z,%f,%f", *EEKF_MAT_EL(sensors.Y.x, 0, 0), *EEKF_MAT_EL(sensors.Y.x, 1, 0), *EEKF_MAT_EL(sensors.Y.z, 0, 0), *EEKF_MAT_EL(sensors.Y.z, 1, 0));
+    //ESP_LOGD("sensors", "Fy,%f,%f,Z,%f,%f", *EEKF_MAT_EL(sensors.Y.x, 0, 0), *EEKF_MAT_EL(sensors.Y.x, 1, 0), *EEKF_MAT_EL(sensors.Y.z, 0, 0), *EEKF_MAT_EL(sensors.Y.z, 1, 0));
+    // Publish
+    //pvPublishFloat(xSensors, SENSORS_PV_Y, *EEKF_MAT_EL(sensors.Y.x, 0, 0));
+    //pvPublishFloat(xSensors, SENSORS_PV_VY, *EEKF_MAT_EL(sensors.Y.x, 1, 0));
 }
 
 eekf_return sensors_fuseY_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const *x,
@@ -520,8 +529,8 @@ eekf_return sensors_fuseY_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const 
     if (NULL == eekf_mat_add(xp, xp, eekf_mat_mul(&gu, &G, u))) return eEekfReturnComputationFailed;
     // Limits einhalten
     float *predictedVelocity = EEKF_MAT_EL(*xp, 1, 0);
-    if (*predictedVelocity > SENSORS_FUSE_Y_LIMIT_VEL) *predictedVelocity = SENSORS_FUSE_Y_LIMIT_VEL;
-    else if (*predictedVelocity < -SENSORS_FUSE_Y_LIMIT_VEL) *predictedVelocity = -SENSORS_FUSE_Y_LIMIT_VEL;
+    if (*predictedVelocity > sensors.Y.limitVelocity) *predictedVelocity = sensors.Y.limitVelocity;
+    else if (*predictedVelocity < -sensors.Y.limitVelocity) *predictedVelocity = -sensors.Y.limitVelocity;
     return eEekfReturnOk;
 }
 
@@ -572,7 +581,7 @@ static void sensors_fuseX(sensors_event_type_t type, float x, int64_t timestamp)
         // Input
         EEKF_DECL_MAT_INIT(u, 1, 1, x);
         // Unsicherheit der Voraussage
-        x = fabsf(x) + SENSORS_FUSE_X_ERROR_ACCELERATION;
+        x = fabsf(x) + sensors.X.errorAcceleration;
         EEKF_DECL_MAT(Q, 2, 2);
         *EEKF_MAT_EL(Q, 0, 0) = 0.25f * x * powf(dt, 4.0f);
         *EEKF_MAT_EL(Q, 0, 1) = 0.5f * x * powf(dt, 3.0f);
@@ -591,7 +600,7 @@ static void sensors_fuseX(sensors_event_type_t type, float x, int64_t timestamp)
         switch (type) {
             case (SENSORS_POSITION):
                 *EEKF_MAT_EL(sensors.X.z, 0, 0) = x;
-                *EEKF_MAT_EL(R, 0, 0) = SENSORS_FUSE_X_ERROR_GPS;
+                *EEKF_MAT_EL(R, 0, 0) = sensors.X.errorGPS;
             case (SENSORS_GROUNDSPEED): // ToDo?
             default:
                 return; // unbekannter Sensortyp
@@ -604,7 +613,10 @@ static void sensors_fuseX(sensors_event_type_t type, float x, int64_t timestamp)
         }
     }
     // DEBUG
-    ESP_LOGD("sensors", "Fx,%f,%f,Z,%f", *EEKF_MAT_EL(sensors.X.x, 0, 0), *EEKF_MAT_EL(sensors.X.x, 1, 0), *EEKF_MAT_EL(sensors.X.z, 0, 0));
+    //ESP_LOGD("sensors", "Fx,%f,%f,Z,%f", *EEKF_MAT_EL(sensors.X.x, 0, 0), *EEKF_MAT_EL(sensors.X.x, 1, 0), *EEKF_MAT_EL(sensors.X.z, 0, 0));
+    // Publish
+    //pvPublishFloat(xSensors, SENSORS_PV_X, *EEKF_MAT_EL(sensors.X.x, 0, 0));
+    //pvPublishFloat(xSensors, SENSORS_PV_VX, *EEKF_MAT_EL(sensors.X.x, 1, 0));
 }
 
 eekf_return sensors_fuseX_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const *x,
@@ -625,8 +637,8 @@ eekf_return sensors_fuseX_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const 
     if (NULL == eekf_mat_add(xp, xp, eekf_mat_mul(&gu, &G, u))) return eEekfReturnComputationFailed;
     // Limits einhalten
     float *predictedVelocity = EEKF_MAT_EL(*xp, 1, 0);
-    if (*predictedVelocity > SENSORS_FUSE_X_LIMIT_VEL) *predictedVelocity = SENSORS_FUSE_X_LIMIT_VEL;
-    else if (*predictedVelocity < -SENSORS_FUSE_X_LIMIT_VEL) *predictedVelocity = -SENSORS_FUSE_X_LIMIT_VEL;
+    if (*predictedVelocity > sensors.X.limitVelocity) *predictedVelocity = sensors.X.limitVelocity;
+    else if (*predictedVelocity < -sensors.X.limitVelocity) *predictedVelocity = -sensors.X.limitVelocity;
     return eEekfReturnOk;
 }
 
