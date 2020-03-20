@@ -109,8 +109,8 @@ void intercom_commandRegister(QueueHandle_t owner, command_list_t *list);
 
 void intercom_commandSend(QueueHandle_t owner, uint32_t commandNum);
 void intercom_commandSend2(uint32_t ownerNum, uint32_t commandNum);
-const char* intercom_commandOwnerName(uint32_t ownerNum);
-const char* intercom_commandCommandName(uint32_t ownerNum, uint32_t commandNum);
+const char* intercom_commandNameOwner(uint32_t ownerNum);
+const char* intercom_commandNameCommand(uint32_t ownerNum, uint32_t commandNum);
 
 
 /*
@@ -146,8 +146,17 @@ typedef struct setting_list_s {
 #define SETTING_LIST(task, settings, length)    setting_list_t settings##_list = {task, NULL, settings, length, NULL};
 
 void intercom_settingRegister(QueueHandle_t owner, setting_list_t *list);
-
 #define settingRegister(queue, settings)        intercom_settingRegister(queue, &(settings##_list))
+
+value_type_t intercom_settingType(QueueHandle_t owner, uint32_t settingNum);
+value_type_t intercom_settingType2(uint32_t ownerNum, uint32_t settingNum);
+bool intercom_settingSet(QueueHandle_t owner, uint32_t settingNum, value_t *value);
+bool intercom_settingSet2(uint32_t ownerNum, uint32_t settingNum, value_t *value);
+bool intercom_settingGet(QueueHandle_t owner, uint32_t settingNum, value_t *value);
+bool intercom_settingGet2(uint32_t ownerNum, uint32_t settingNum, value_t *value);
+
+const char* intercom_settingNameOwner(uint32_t ownerNum);
+const char* intercom_settingNameSetting(uint32_t ownerNum, uint32_t settingNum);
 
 
 /*
@@ -182,12 +191,18 @@ typedef struct parameter_list_s {
 
 #define PARAMETER_LIST(task, parameters, length)    parameter_list_t parameters##_list = {task, NULL, parameters, length, NULL};
 
-bool intercom_parameterSet(QueueHandle_t owner, uint32_t parameterNum, void *value);
-bool intercom_parameterGet(QueueHandle_t owner, uint32_t parameterNum, void *variable);
+void intercom_parameterRegister(QueueHandle_t owner, parameter_list_t *list);
+#define parameterRegister(queue, parameters)        intercom_parameterRegister(queue, &(parameters##_list))
 
-#define parameterSet(owner, parameterNum, value)    intercom_parameterSet(owner, parameterNum, (void*)&value)
+value_type_t intercom_parameterType(QueueHandle_t owner, uint32_t parameterNum);
+value_type_t intercom_parameterType2(uint32_t ownerNum, uint32_t parameterNum);
+bool intercom_parameterSet(QueueHandle_t owner, uint32_t parameterNum, value_t *value);
+bool intercom_parameterSet2(uint32_t ownerNum, uint32_t parameterNum, value_t *value);
+bool intercom_parameterGet(QueueHandle_t owner, uint32_t parameterNum, value_t *value);
+bool intercom_parameterGet2(uint32_t ownerNum, uint32_t parameterNum, value_t *value);
 
-#define parameterGet(owner, parameterNum, variable) intercom_parameterGet(owner, parameterNum, (void*)&variable)
+const char* intercom_parameterNameOwner(uint32_t ownerNum);
+const char* intercom_parameterNameParameter(uint32_t ownerNum, uint32_t settingNum);
 
 
 /*
@@ -240,18 +255,22 @@ typedef struct pv_list_s {
 #define PV_LIST(task, pvs, length)  pv_list_t pvs##_list = {task, NULL, pvs, length, NULL};
 
 void intercom_pvRegister(QueueHandle_t publisher, pv_list_t *list);
-pv_t *intercom_pvSubscribe(QueueHandle_t subscriber, QueueHandle_t publisher, uint32_t pvNum);
-void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum, value_t value);
-
 #define pvRegister(queue, pvs)      intercom_pvRegister(queue, &(pvs##_list))
+pv_t *intercom_pvSubscribe(QueueHandle_t subscriber, QueueHandle_t publisher, uint32_t pvNum);
+pv_t *intercom_pvSubscribe2(QueueHandle_t subscriber, uint32_t publisherNum, uint32_t pvNum);
 
+void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum, value_t value);
 #define pvPublish(publisher, pvNum)             intercom_pvPublish(publisher, pvNum, (value_t)0)
 #define pvPublishUint(publisher, pvNum, value)  intercom_pvPublish(publisher, pvNum, (value_t){.ui = value})
 #define pvPublishInt(publisher, pvNum, value)   intercom_pvPublish(publisher, pvNum, (value_t){.i = value})
 #define pvPublishFloat(publisher, pvNum, value) intercom_pvPublish(publisher, pvNum, (value_t){.f = value})
 
-#define pvGet(pv)           (pv->type == VALUE_TYPE_NONE ? true : false)
-#define pvGetUint(pv)       (pv->type == VALUE_TYPE_UINT ? pv->value.ui : 0UL)
-#define pvGetInt(pv)        (pv->type == VALUE_TYPE_INT ? pv->value.i : 0L)
-#define pvGetFloat(pv)      (pv->type == VALUE_TYPE_FLOAT ? pv->value.f : 0.0f)
-#define pvGetPointer(pv)    (pv->type == VALUE_TYPE_POINTER ? pv->value.p : NULL)
+#define pvGet(pv)           ((pv && (pv->type == VALUE_TYPE_NONE)) ? true : false)
+#define pvGetUint(pv)       ((pv && (pv->type == VALUE_TYPE_UINT)) ? pv->value.ui : 0UL)
+#define pvGetInt(pv)        ((pv && (pv->type == VALUE_TYPE_INT)) ? pv->value.i : 0L)
+#define pvGetFloat(pv)      ((pv && (pv->type == VALUE_TYPE_FLOAT)) ? pv->value.f : 0.0f)
+#define pvGetPointer(pv)    ((pv && (pv->type == VALUE_TYPE_POINTER)) ? pv->value.p : NULL)
+
+const char* intercom_pvNamePublisher(uint32_t ownerNum);
+const char* intercom_pvNamePv(uint32_t ownerNum, uint32_t settingNum);
+bool intercom_pvIndex(pv_t *pv, uint32_t *subscriberNum, uint32_t *pvNum);
