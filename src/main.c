@@ -57,12 +57,30 @@
 #define GPS_TX_HOST_RX      GPIO_NUM_16
 #define LED_I2C             GPIO_NUM_22
 
+// Bugs:
+// - GPS bleibt machnmal im init hängen? nach interrupt 35 allokieren
+// - Sensors X rechnet noch nicht mit Geschwindigkeit vom GPS
+// - NVS speichert einstellungen nicht?
+
+typedef enum {
+    MAIN_PV_TICKS,
+    MAIN_PV_MAX
+} main_pv_t;
+
+TickType_t currentTick;
+
+pv_t main_pvs[MAIN_PV_MAX] = {
+    PV("tick", VALUE_TYPE_UINT)
+};
+PV_LIST("main", main_pvs, MAIN_PV_MAX);
 
 
 void app_main(void* arg) {
     // Setup
     esp_log_level_set("*", ESP_LOG_VERBOSE);
     ESP_LOGI("quadro2", "Version: %s - %s", __DATE__, __TIME__);
+
+    pvRegister(1, main_pvs);
 
     bool ret = false;
     ESP_LOGI("quadro2", "Starte Sensorik...");
@@ -84,8 +102,10 @@ void app_main(void* arg) {
 
     // Main Loop
     while (true) {
-        vTaskDelay(10000 / portTICK_PERIOD_MS);
-        intercom_commandSend(xSensors, SENSORS_COMMAND_SET_HOME);
-        vTaskDelay(portMAX_DELAY);
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        currentTick = xTaskGetTickCount() * portTICK_PERIOD_MS;
+        pvPublishUint(1, MAIN_PV_TICKS, currentTick);
+        // intercom_commandSend(xSensors, SENSORS_COMMAND_SET_HOME);
+        // vTaskDelay(portMAX_DELAY);
     }
 }
