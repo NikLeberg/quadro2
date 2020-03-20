@@ -133,7 +133,7 @@ static bool gps_uartEnable(gpio_num_t txPin, gpio_num_t rxPin);
  *
  * returns uint32_t: erkannte Baudrate
  */
-static uint32_t gps_uartAutoBaud();
+// static uint32_t gps_uartAutoBaud();
 
 /*
  * Function: gps_uartRxFifoReset
@@ -370,35 +370,35 @@ static bool gps_uartEnable(gpio_num_t txPin, gpio_num_t rxPin) {
     return false;
 }
 
-static uint32_t gps_uartAutoBaud() {
-    uart_dev_t *uart = UART[GPS_UART];
-    uint32_t low_period = 0, high_period = 0;
-    uint32_t intena_reg = uart->int_ena.val;
-    // Interrupts deaktivieren
-    uart->int_ena.val = 0;
-    uart->int_clr.val = UART_INTR_MASK;
-    // Voreinstellungen
-    uart->auto_baud.glitch_filt = 8;
-    uart->auto_baud.en = 0;
-    // aktivieren und 100 Impulse abwarten
-    uart->auto_baud.en = 1;
-    while (uart->rxd_cnt.edge_cnt < 100) {
-        ets_delay_us(10);
-    }
-    low_period = uart->lowpulse.min_cnt;
-    high_period = uart->highpulse.min_cnt;
-    // Auto-Baud deaktivieren
-    uart->auto_baud.en = 0;
-    // ermittelte Baudrate einstellen
-    uart->clk_div.div_int = (low_period > high_period) ? high_period : low_period;
-    uart->clk_div.div_frag = 0;
-    // FIFO zurücksetzen
-    gps_uartRxFifoReset();
-    // Interrupts wieder aktivieren
-    uart->int_ena.val = intena_reg;
-    // return Baudrate, baud = APB / divider
-    return APB_CLK_FREQ / ((low_period > high_period) ? high_period : low_period);
-}
+// static uint32_t gps_uartAutoBaud() {
+//     uart_dev_t *uart = UART[GPS_UART];
+//     uint32_t low_period = 0, high_period = 0;
+//     uint32_t intena_reg = uart->int_ena.val;
+//     // Interrupts deaktivieren
+//     uart->int_ena.val = 0;
+//     uart->int_clr.val = UART_INTR_MASK;
+//     // Voreinstellungen
+//     uart->auto_baud.glitch_filt = 8;
+//     uart->auto_baud.en = 0;
+//     // aktivieren und 100 Impulse abwarten
+//     uart->auto_baud.en = 1;
+//     while (uart->rxd_cnt.edge_cnt < 100) {
+//         ets_delay_us(10);
+//     }
+//     low_period = uart->lowpulse.min_cnt;
+//     high_period = uart->highpulse.min_cnt;
+//     // Auto-Baud deaktivieren
+//     uart->auto_baud.en = 0;
+//     // ermittelte Baudrate einstellen
+//     uart->clk_div.div_int = (low_period > high_period) ? high_period : low_period;
+//     uart->clk_div.div_frag = 0;
+//     // FIFO zurücksetzen
+//     gps_uartRxFifoReset();
+//     // Interrupts wieder aktivieren
+//     uart->int_ena.val = intena_reg;
+//     // return Baudrate, baud = APB / divider
+//     return APB_CLK_FREQ / ((low_period > high_period) ? high_period : low_period);
+// }
 
 static void gps_uartRxFifoReset() {
     uart_dev_t *uart = UART[GPS_UART];
