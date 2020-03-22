@@ -492,7 +492,7 @@ static pv_list_t *intercom_pvSearchPublisher2(uint32_t publisherNum) {
 
 pv_t *intercom_pvSubscribe(QueueHandle_t subscriber, QueueHandle_t publisher, uint32_t pvNum) {
     pv_list_t *node = intercom_pvSearchPublisher(publisher);
-    if (!node || pvNum >= node->length) return true; // Pv nicht vorhanden
+    if (!node || pvNum >= node->length) return NULL; // Pv nicht vorhanden
     pv_t *pv = &node->pvs[pvNum];
     // Subscriber speichern
     for (uint8_t i = 0; i <= INTERCOM_PV_MAX_SUBSCRIBERS; ++i) {
