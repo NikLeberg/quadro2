@@ -61,6 +61,8 @@
 // - GPS bleibt machnmal im init hängen? nach interrupt 35 allokieren
 // - Sensors X rechnet noch nicht mit Geschwindigkeit vom GPS
 // - NVS speichert einstellungen nicht?
+// - libesphttpd besser portieren
+// - ws versendet bis zu 3x eine Nachricht
 
 typedef enum {
     MAIN_PV_TICKS,
