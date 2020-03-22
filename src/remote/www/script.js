@@ -27,8 +27,8 @@ function processMessage(event) {
             gotStatus,
             gotLog,
             undefined,
-            undefined,
-            undefined,
+            gotSetting,
+            gotParameter,
             gotPv,
             gotCommandList,
             gotSettingList,
@@ -85,6 +85,16 @@ function gotLog(message) {
     };
     line.style.color = colors[level];
     log.prepend(line);
+}
+
+function gotSetting(setting) {
+    console.log(setting);
+    return;
+}
+
+function gotParameter(parameter) {
+    console.log(parameter);
+    return;
 }
 
 function gotPv(pv) {
