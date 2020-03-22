@@ -234,6 +234,7 @@ void gps_task(void* arg) {
         // -> https://gis.stackexchange.com/questions/2951
         gps.position.vector.y = v.y * 111111.0f * cosf(v.x * M_PI / 180.0f);
         gps.position.vector.x = v.x * 111111.0f;
+        gps.position.vector.z = v.z;
         gps.forward.data = &gps.position;
         xQueueSendToBack(xSensors, &gps.forward, 0);
         // Geschwindigkeit
