@@ -166,7 +166,7 @@ void intercom_settingRegister(QueueHandle_t owner, setting_list_t *list) {
     esp_err_t err;
     err = nvs_open(list->task, NVS_READWRITE, &nvs);
     if (err == ESP_ERR_NVS_NOT_INITIALIZED) {
-        esp_log_level_set("nvs", ESP_LOG_INFO);
+        // esp_log_level_set("nvs", ESP_LOG_INFO);
         if (nvs_flash_init()) {
             if (nvs_flash_erase() || nvs_flash_init()) return;
         }
