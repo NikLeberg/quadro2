@@ -398,16 +398,16 @@ static void remote_pvForward(pv_t *pv) {
     size_t length;
     switch (pv->type) {
         case (VALUE_TYPE_NONE):
-            length = snprintf(buffer, sizeof(buffer), "[%d,[%d,%d,%d,true]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_NONE);
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,true]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_NONE);
             break;
         case (VALUE_TYPE_UINT):
-            length = snprintf(buffer, sizeof(buffer), "[%d,[%d,%d,%d,%d]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_UINT, pv->value.ui);
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,%u]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_UINT, pv->value.ui);
             break;
         case (VALUE_TYPE_INT):
-            length = snprintf(buffer, sizeof(buffer), "[%d,[%d,%d,%d,%d]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_INT, pv->value.i);
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,%d]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_INT, pv->value.i);
             break;
         case (VALUE_TYPE_FLOAT):
-            length = snprintf(buffer, sizeof(buffer), "[%d,[%d,%d,%d,%.9g]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_FLOAT, pv->value.f);
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,%.9g]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_FLOAT, pv->value.f);
             break;
         default:
             return;
@@ -452,7 +452,6 @@ static void remote_messageProcess(char *message, size_t length) {
                             intercom_pvSubscribe2(xRemote, json_getInteger(jPublisher), json_getInteger(jPv));
                         }
                     }
-                    break;
                     break;
                 }
                 case (REMOTE_MESSAGE_COMMANDS): // [type] - lade Liste
@@ -511,11 +510,11 @@ static void remote_intercomGetSet(remote_message_type_t type, const json_t *jDat
         char buffer[32];
         size_t length;
         if (valueType == VALUE_TYPE_UINT) {
-            length = snprintf(buffer, sizeof(buffer), "[%d,[%d,%d,%d,%d]]", type, node, element, valueType, value.ui);
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,%u]]", type, node, element, valueType, value.ui);
         } else if (valueType == VALUE_TYPE_INT) {
-            length = snprintf(buffer, sizeof(buffer), "[%d,[%d,%d,%d,%d]]", type, node, element, valueType, value.i);
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,%d]]", type, node, element, valueType, value.i);
         } else if (valueType == VALUE_TYPE_FLOAT) {
-            length = snprintf(buffer, sizeof(buffer), "[%d,[%d,%d,%d,%.9g]]", type, node, element, valueType, value.f);
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,%.9g]]", type, node, element, valueType, value.f);
         } else return;
         if (length > 0 && length <= sizeof(buffer)) {
             remote_messageSend(buffer, length);
