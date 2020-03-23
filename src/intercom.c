@@ -165,19 +165,20 @@ void intercom_settingRegister(QueueHandle_t owner, setting_list_t *list) {
     nvs_handle nvs;
     esp_err_t err;
     err = nvs_open(list->task, NVS_READWRITE, &nvs);
-    if (err == ESP_ERR_NVS_NOT_INITIALIZED) {
-        // esp_log_level_set("nvs", ESP_LOG_INFO);
+    if (err == ESP_ERR_NVS_NOT_INITIALIZED) { // lazy init
+        esp_log_level_set("nvs", ESP_LOG_INFO);
         if (nvs_flash_init()) {
-            if (nvs_flash_erase() || nvs_flash_init()) return;
+            nvs_flash_erase();
+            if (nvs_flash_init()) return;
         }
         if (nvs_open(list->task, NVS_READWRITE, &nvs)) return;
     } else if (err) return;
     for (size_t i = 0; i < list->length; ++i) {
         err = nvs_get_u32(nvs, list->settings[i].name, list->settings[i].address);
         if (err == ESP_ERR_NVS_NOT_FOUND) {
-            if (nvs_set_u32(nvs, list->settings[i].name, *(uint32_t*)(list->settings[i].address))) return;
-            if (nvs_commit(nvs)) return;
-        } else if (err) return;
+            if (nvs_set_u32(nvs, list->settings[i].name, *(uint32_t*)(list->settings[i].address))) break;
+            if (nvs_commit(nvs)) break;
+        } else if (err) break;
     }
     nvs_close(nvs);
 }
@@ -237,7 +238,7 @@ bool intercom_settingSet(QueueHandle_t owner, uint32_t settingNum, value_t *valu
     }
     // in NVS aktualisieren
     nvs_handle nvs;
-    if (nvs_open(node->task, NVS_READWRITE, &nvs)) {
+    if (!nvs_open(node->task, NVS_READWRITE, &nvs)) {
         if (nvs_set_u32(nvs, setting->name, value->ui) || nvs_commit(nvs)) return true;
         nvs_close(nvs);
     }
