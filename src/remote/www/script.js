@@ -27,7 +27,7 @@ function processMessage(event) {
             gotStatus,
             gotLog,
             undefined,
-            gotSetting,
+            settingResponse,
             gotParameter,
             gotPv,
             gotCommandList,
@@ -87,11 +87,6 @@ function gotLog(message) {
     log.prepend(line);
 }
 
-function gotSetting(setting) {
-    console.log(setting);
-    return;
-}
-
 function gotParameter(parameter) {
     console.log(parameter);
     return;
@@ -118,16 +113,7 @@ function gotCommandList(commands) {
         }
         f.appendChild(set);
     }
-}
-
-function gotSettingList(setting) {
-    gotCommandList(setting);
-}
-function gotParameterList(parameter) {
-    gotCommandList(parameter);
-}
-function gotPvList(pv) {
-    gotCommandList(pv);
+    f.addEventListener("click", commandClick, true);
 }
 
 function commandClick(event) {
@@ -136,6 +122,66 @@ function commandClick(event) {
     let n = $("fieldset", t.form).indexOf(p);
     let e = $("input", p).indexOf(t);
     ws.send("[3,[" + n + "," + e + "]]");
+}
+
+function gotSettingList(settings) {
+    let f = $("#settings")[0];
+    while (f.firstChild) {
+        f.removeChild(f.firstChild);
+    }
+    for (let node of settings) {
+        let set = document.createElement("fieldset");
+        set.innerHTML = "<legend>" + node[0] + "</legend>";
+        for (let element of node[1]) {
+            set.innerHTML += "<input type='number' name='" + element + "'> ";
+            set.innerHTML += "<label for='" + element + "'>" + element + "</label><br>";
+        }
+        f.appendChild(set);
+    }
+    $("input", f).forEach(settingRequest);
+    f.addEventListener("blur", settingBlur, true);
+}
+
+function settingRequest(i) {
+    let p = i.parentNode;
+    let n = $("fieldset", i.form).indexOf(p);
+    let e = $("input", p).indexOf(i);
+    ws.send("[4,[" + n + "," + e + "]]");
+}
+
+function settingResponse(setting) {
+    let f = $("#settings")[0];
+    let n = $("fieldset", f)[setting[0]];
+    let e = $("input", n)[setting[1]];
+    e.setAttribute("qType", setting[2]);
+    e.value = setting[3];
+}
+
+function settingBlur(event) {
+    let t = event.target;
+    let p = t.parentNode;
+    let n = $("fieldset", t.form).indexOf(p);
+    let e = $("input", p).indexOf(t);
+    let v = t.value;
+    if (!t.attributes.qType) return;
+    switch(parseInt(t.attributes.qtype.value)) {
+        case (1):
+            if (v < 0) v = 0;
+        case (2):
+            v = Math.round(v);
+        case (3):
+            break;
+        default:
+            return;
+    }
+    ws.send("[4,[" + n + "," + e + "," + t.value + "]]");
+}
+
+function gotParameterList(parameter) {
+    gotCommandList(parameter);
+}
+function gotPvList(pv) {
+    gotCommandList(pv);
 }
 
 function clearLog() {
