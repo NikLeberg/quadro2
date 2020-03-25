@@ -242,8 +242,6 @@ bool intercom_settingSet(QueueHandle_t owner, uint32_t settingNum, value_t *valu
         if (nvs_set_u32(nvs, setting->name, value->ui) || nvs_commit(nvs)) return true;
         nvs_close(nvs);
     }
-    // Log
-    ESP_LOGD("intercom", "Von '%s' wurde Einstellung '%s' geschrieben.", node->task, setting->name);
     return false;
 }
 
@@ -270,8 +268,6 @@ bool intercom_settingGet(QueueHandle_t owner, uint32_t settingNum, value_t *valu
         default:
             return true;
     }
-    // Log
-    ESP_LOGD("intercom", "Von '%s' wurde Einstellung '%s' gelesen.", node->task, setting->name);
     return false;
 }
 
@@ -375,8 +371,6 @@ bool intercom_parameterSet(QueueHandle_t owner, uint32_t parameterNum, value_t *
         default:
             return true;
     }
-    // Log
-    ESP_LOGD("intercom", "Von '%s' wurde Parameter '%s' geschrieben.", node->task, parameter->name);
     return false;
 }
 
@@ -403,8 +397,6 @@ bool intercom_parameterGet(QueueHandle_t owner, uint32_t parameterNum, value_t *
         default:
             return true;
     }
-    // Log
-    ESP_LOGD("intercom", "Von '%s' wurde Parameter '%s' gelesen.", node->task, parameter->name);
     return false;
 }
 
@@ -498,6 +490,10 @@ pv_t *intercom_pvSubscribe(QueueHandle_t subscriber, QueueHandle_t publisher, ui
     // Subscriber speichern
     for (uint8_t i = 0; i <= INTERCOM_PV_MAX_SUBSCRIBERS; ++i) {
         if (i == INTERCOM_PV_MAX_SUBSCRIBERS) return NULL; // kein Platz verfügbar
+        if (pv->subscribers[i] == subscriber) { // bereits registriert, löschen
+            pv->subscribers[i] = NULL;
+            return NULL;
+        }
         if (pv->subscribers[i]) continue;
         pv->subscribers[i] = subscriber;
         break;
@@ -513,7 +509,7 @@ pv_t *intercom_pvSubscribe2(QueueHandle_t subscriber, uint32_t publisherNum, uin
 
 void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum, value_t value) {
     pv_list_t *node = intercom_pvSearchPublisher(publisher);
-    if (!node || pvNum >= node->length) return true; // Pv nicht vorhanden
+    if (!node || pvNum >= node->length) return; // Pv nicht vorhanden
     pv_t *pv = &node->pvs[pvNum];
     pv->value = value;
     // an alle Subscriber senden
@@ -522,8 +518,6 @@ void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum, value_t value) 
         if (!pv->subscribers[i]) break;
         xQueueSendToBack(pv->subscribers[i], &event, 0);
     }
-    // Log
-    ESP_LOGD("intercom", "%s sendet: %s", node->task, pv->name);
 }
 
 const char* intercom_pvNamePublisher(uint32_t publisherNum) {
