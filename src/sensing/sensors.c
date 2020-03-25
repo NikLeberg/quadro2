@@ -380,6 +380,7 @@ static void sensors_fuseZ(sensors_event_type_t type, float z, int64_t timestamp)
             case (SENSORS_POSITION):
                 *EEKF_MAT_EL(sensors.Z.z, 2, 0) = z;
                 *EEKF_MAT_EL(R, 2, 2) = sensors.Z.errorGPS;
+                break;
             default:
                 return; // unbekannter Sensortyp
         }
@@ -393,8 +394,8 @@ static void sensors_fuseZ(sensors_event_type_t type, float z, int64_t timestamp)
     // DEBUG
     //ESP_LOGD("sensors", "Fz,%f,%f,Z,%f,%f,%f", *EEKF_MAT_EL(sensors.Z.x, 0, 0), *EEKF_MAT_EL(sensors.Z.x, 1, 0), *EEKF_MAT_EL(sensors.Z.z, 0, 0), *EEKF_MAT_EL(sensors.Z.z, 1, 0), *EEKF_MAT_EL(sensors.Z.z, 2, 0));
     // Publish
-    //pvPublishFloat(xSensors, SENSORS_PV_Z, *EEKF_MAT_EL(sensors.Z.x, 0, 0));
-    //pvPublishFloat(xSensors, SENSORS_PV_VZ, *EEKF_MAT_EL(sensors.Z.x, 1, 0));
+    pvPublishFloat(xSensors, SENSORS_PV_Z, *EEKF_MAT_EL(sensors.Z.x, 0, 0));
+    pvPublishFloat(xSensors, SENSORS_PV_VZ, *EEKF_MAT_EL(sensors.Z.x, 1, 0));
 }
 
 eekf_return sensors_fuseZ_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const *x,
@@ -491,9 +492,11 @@ static void sensors_fuseY(sensors_event_type_t type, float y, int64_t timestamp)
             case (SENSORS_POSITION):
                 *EEKF_MAT_EL(sensors.Y.z, 0, 0) = y;
                 *EEKF_MAT_EL(R, 0, 0) = sensors.Y.errorGPS;
+                break;
             case (SENSORS_GROUNDSPEED):
                 *EEKF_MAT_EL(sensors.Y.z, 1, 0) = y;
                 *EEKF_MAT_EL(R, 1, 1) = sensors.Y.errorVelocity;
+                break;
             default:
                 return; // unbekannter Sensortyp
         }
@@ -544,6 +547,7 @@ eekf_return sensors_fuseY_measurement(eekf_mat* zp, eekf_mat* Jh, eekf_mat const
             break;
         case (SENSORS_GROUNDSPEED):
             *EEKF_MAT_EL(*Jh, 1, 1) = 1.0f;
+            break;
         default:
             return eEekfReturnParameterError;
     }
@@ -601,7 +605,9 @@ static void sensors_fuseX(sensors_event_type_t type, float x, int64_t timestamp)
             case (SENSORS_POSITION):
                 *EEKF_MAT_EL(sensors.X.z, 0, 0) = x;
                 *EEKF_MAT_EL(R, 0, 0) = sensors.X.errorGPS;
+                break;
             case (SENSORS_GROUNDSPEED): // ToDo?
+                // break;
             default:
                 return; // unbekannter Sensortyp
         }
@@ -652,6 +658,7 @@ eekf_return sensors_fuseX_measurement(eekf_mat* zp, eekf_mat* Jh, eekf_mat const
             break;
         // case (SENSORS_GROUNDSPEED):
         //     *EEKF_MAT_EL(*Jh, 0, 1) = 1.0f;
+        //     break;
         default:
             return eEekfReturnParameterError;
     }
