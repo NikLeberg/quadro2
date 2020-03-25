@@ -244,24 +244,24 @@ int remote_printLog(const char *format, va_list arguments);
 
 /** Files **/
 
-extern char _binary_src_remote_www_index_html_start;
-extern char _binary_src_remote_www_index_html_end;
+extern char _binary_src_remote_www_index_min_html_start;
+extern char _binary_src_remote_www_index_min_html_end;
 extern char _binary_src_remote_www_manifest_json_start;
 extern char _binary_src_remote_www_manifest_json_end;
 extern char _binary_src_remote_www_favicon_ico_gz_start;
 extern char _binary_src_remote_www_favicon_ico_gz_end;
-extern char _binary_src_remote_www_script_js_start;
-extern char _binary_src_remote_www_script_js_end;
+extern char _binary_src_remote_www_script_min_js_start;
+extern char _binary_src_remote_www_script_min_js_end;
 
 HttpdBuiltInUrl builtInUrls[] = {
     // WebSocket
     ROUTE_WS("/ws", remote_wsConnect),
     // Website
-    ROUTE_CGI_ARG2("/", remote_sendEmbedded, &_binary_src_remote_www_index_html_start, &_binary_src_remote_www_index_html_end),
-    ROUTE_CGI_ARG2("/index.html", remote_sendEmbedded, &_binary_src_remote_www_index_html_start, &_binary_src_remote_www_index_html_end),
+    ROUTE_CGI_ARG2("/", remote_sendEmbedded, &_binary_src_remote_www_index_min_html_start, &_binary_src_remote_www_index_min_html_end),
+    ROUTE_CGI_ARG2("/index.html", remote_sendEmbedded, &_binary_src_remote_www_index_min_html_start, &_binary_src_remote_www_index_min_html_end),
     ROUTE_CGI_ARG2("/manifest.json", remote_sendEmbedded, &_binary_src_remote_www_manifest_json_start, &_binary_src_remote_www_manifest_json_end),
     ROUTE_CGI_ARG2("/favicon.ico", remote_sendEmbedded, &_binary_src_remote_www_favicon_ico_gz_start, &_binary_src_remote_www_favicon_ico_gz_end),
-    ROUTE_CGI_ARG2("/script.js", remote_sendEmbedded, &_binary_src_remote_www_script_js_start, &_binary_src_remote_www_script_js_end),
+    ROUTE_CGI_ARG2("/script.js", remote_sendEmbedded, &_binary_src_remote_www_script_min_js_start, &_binary_src_remote_www_script_min_js_end),
     ROUTE_END()
 };
 
