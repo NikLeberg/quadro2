@@ -17,6 +17,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/event_groups.h"
+#include "freertos/ringbuf.h"
 #include "netif/wlanif.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -30,7 +31,6 @@
 #include "httpd-freertos.c"
 #include "cgiwebsocket.h"
 #include "route.h"
-#include "ringbuf.h"
 #include "tiny-json.h"
 
 
@@ -57,8 +57,14 @@ struct remote_t {
     uint8_t connected;
     Websock *ws;
 
+    esp_log_level_t logLevel;
     vprintf_like_t defaultLog;
 } remote;
+
+static setting_t remote_settings[REMOTE_SETTING_MAX] = {
+    SETTING("logLevel", &remote.logLevel, VALUE_TYPE_UINT)
+};
+static SETTING_LIST("remote", remote_settings, REMOTE_SETTING_MAX);
 
 static pv_t remote_pvs[REMOTE_PV_MAX] = {
     PV("connections", VALUE_TYPE_UINT),
@@ -269,6 +275,7 @@ bool remote_init(char* ssid, char* pw) {
     // Intercom-Queue erstellen
     xRemote = xQueueCreate(32, sizeof(event_t));
     // an Intercom anbinden
+    settingRegister(xRemote, remote_settings);
     pvRegister(xRemote, remote_pvs);
     // Rx/Tx Ringbuffer erstellen
     remote.wsRxBuffer = xRingbufferCreate(1 * 1024, RINGBUF_TYPE_NOSPLIT);
@@ -449,7 +456,9 @@ static void remote_messageProcess(char *message, size_t length) {
                         const json_t *jPublisher = json_getChild(jData);
                         const json_t *jPv = (jPublisher) ? json_getSibling(jPublisher) : NULL;
                         if (jPv && json_getType(jPublisher) == JSON_INTEGER && json_getType(jPv) == JSON_INTEGER) { // valid
-                            intercom_pvSubscribe2(xRemote, json_getInteger(jPublisher), json_getInteger(jPv));
+                            pv_t *pv;
+                            pv = intercom_pvSubscribe2(xRemote, json_getInteger(jPublisher), json_getInteger(jPv));
+                            if (pv) remote_pvForward(pv); // zuletzt bekannter Zustand schicken
                         }
                     }
                     break;
@@ -611,7 +620,7 @@ CgiStatus remote_sendEmbedded(HttpdConnData *connData) {
     const char *fileStart = connData->cgiArg;
     const char *fileEnd = (const char*) connData->cgiArg2 - 1; // Null-Terminator wird nicht gebraucht
     uint32_t *sentLength = (uint32_t*) &connData->cgiData;
-    uint32_t fileLength = fileEnd - fileStart;
+    uint32_t fileLength = (uint32_t)fileEnd - (uint32_t)fileStart;
     uint32_t remainingLength;
     // Prüfe
     if (!fileStart || !fileEnd || fileEnd <= fileStart) return HTTPD_CGI_NOTFOUND;
@@ -637,20 +646,45 @@ CgiStatus remote_sendEmbedded(HttpdConnData *connData) {
 }
 
 int remote_printLog(const char * format, va_list arguments) {
-    char buffer[128];
-    size_t length = 0;
-    FILE *f = fmemopen(buffer, sizeof(buffer), "w");
-    length += fprintf(f, "[%d,\"", REMOTE_MESSAGE_LOG);
-    length += vfprintf(f, format, arguments);
-    length += fprintf(f, "\"]");
-    fclose(f);
-    // RET entfernen
-    for (size_t i = 0; i <= length; ++i) {
-        if (buffer[i] == '\n') buffer[i] = ' ';
-    }
-    if (xRingbufferSend(remote.wsTxBuffer, buffer, length, 0) == pdTRUE) {
-        event_t event = {EVENT_INTERNAL, (void*)REMOTE_EVENT_WS_SEND};
-        xQueueSendToBack(xRemote, &event, 0);
+    if (remote.logLevel) {
+        bool shouldForward = false;
+        switch (format[0]) {
+            case ('E'):
+                shouldForward = true;
+                break;
+            case ('W'):
+                shouldForward = (remote.logLevel >= ESP_LOG_WARN);
+                break;
+            case ('I'):
+                shouldForward = (remote.logLevel >= ESP_LOG_INFO);
+                break;
+            case ('D'):
+                shouldForward = (remote.logLevel >= ESP_LOG_DEBUG);
+                break;
+            case ('V'):
+                shouldForward = (remote.logLevel == ESP_LOG_VERBOSE);
+                break;
+            default:
+                shouldForward = false;
+                break;
+        }
+        if (shouldForward) {
+            char buffer[128];
+            size_t length = 0;
+            FILE *f = fmemopen(buffer, sizeof(buffer), "w");
+            length += fprintf(f, "[%d,\"", REMOTE_MESSAGE_LOG);
+            length += vfprintf(f, format, arguments);
+            length += fprintf(f, "\"]");
+            fclose(f);
+            // RET entfernen
+            for (size_t i = 0; i <= length; ++i) {
+                if (buffer[i] == '\n') buffer[i] = ' ';
+            }
+            if (xRingbufferSend(remote.wsTxBuffer, buffer, length, 0) == pdTRUE) {
+                event_t event = {EVENT_INTERNAL, (void*)REMOTE_EVENT_WS_SEND};
+                xQueueSendToBack(xRemote, &event, 0);
+            }
+        }
     }
     return remote.defaultLog(format, arguments);
 }

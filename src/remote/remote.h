@@ -34,6 +34,11 @@
 
 /** Einstellungen **/
 
+typedef enum {
+    REMOTE_SETTING_LOGLEVEL = 0,
+    REMOTE_SETTING_MAX
+} rempte_setting_t;
+
 
 /** Parameter **/
 

@@ -1,5 +1,14 @@
 "use strict";
 
+NodeList.prototype.indexOf = Array.prototype.indexOf;
+let $ = (s, o = document) => o.querySelectorAll(s);
+
+function empty(e) {
+    while (e.firstChild) {
+        e.removeChild(e.firstChild);
+    }
+}
+
 let ws;
 
 window.onload = init;
@@ -39,10 +48,8 @@ function processMessage(event) {
     } catch (e) {
         console.error(e);
     }
-    // // Timeout
     // clearTimeout(ws.timeout);
     // ws.timeout = setTimeout(reconnect, 2000);
-    // Status anzeigen
     displayConnectivity();
 }
 
@@ -55,7 +62,7 @@ function displayConnectivity() {
     setTimeout(function(){
         displayConnectivity.locked = false;
     }, 100);
-    let e = document.getElementById("ws");
+    let e = $("#ws")[0];
     let spinner = {
         '-' : '\\',
         '\\' : '|',
@@ -70,9 +77,9 @@ function gotStatus(message) {
 }
 
 function gotLog(message) {
-    let filter = document.getElementsByName("logFilter")[0].value;
+    let filter = $("[name=logFilter]")[0].value;
     if (!message.includes(filter)) return;
-    let log = document.getElementById("log");
+    let log = $("#log")[0];
     let level = message.charAt(0);
     let line = document.createElement("pre");
     line.innerHTML = message;
@@ -92,24 +99,15 @@ function gotParameter(parameter) {
     return;
 }
 
-function gotPv(pv) {
-    console.log(pv);
-    return;
-}
-
-NodeList.prototype.indexOf = Array.prototype.indexOf;
-let $ = (s,o = document) => o.querySelectorAll(s);
-
 function gotCommandList(commands) {
     let f = $("#commands")[0];
-    while (f.firstChild) {
-        f.removeChild(f.firstChild);
-    }
+    empty(f);
     for (let node of commands) {
         let set = document.createElement("fieldset");
+        set.name = node[0];
         set.innerHTML = "<legend>" + node[0] + "</legend>";
         for (let element of node[1]) {
-            set.innerHTML += "<input type='button' value='" + element + "'> ";
+            set.innerHTML += "<input type='button' value='" + element + "' name='" + element + "'> ";
         }
         f.appendChild(set);
     }
@@ -126,11 +124,10 @@ function commandClick(event) {
 
 function gotSettingList(settings) {
     let f = $("#settings")[0];
-    while (f.firstChild) {
-        f.removeChild(f.firstChild);
-    }
+    empty(f);
     for (let node of settings) {
         let set = document.createElement("fieldset");
+        set.name = node[0];
         set.innerHTML = "<legend>" + node[0] + "</legend>";
         for (let element of node[1]) {
             set.innerHTML += "<input type='number' name='" + element + "'> ";
@@ -164,7 +161,7 @@ function settingBlur(event) {
     let e = $("input", p).indexOf(t);
     let v = t.value;
     if (!t.attributes.qType) return;
-    switch(parseInt(t.attributes.qtype.value)) {
+    switch (parseInt(t.attributes.qtype.value)) {
         case (1):
             if (v < 0) v = 0;
         case (2):
@@ -177,16 +174,47 @@ function settingBlur(event) {
     ws.send("[4,[" + n + "," + e + "," + t.value + "]]");
 }
 
-function gotParameterList(parameter) {
-    gotCommandList(parameter);
+function gotParameterList(parameters) {
+    gotCommandList(parameters);
 }
-function gotPvList(pv) {
-    gotCommandList(pv);
+
+function gotPvList(pvs) {
+    let f = $("#pvs")[0];
+    empty(f);
+    for (let node of pvs) {
+        let set = document.createElement("fieldset");
+        set.name = node[0];
+        set.innerHTML = "<legend>" + node[0] + "</legend>";
+        for (let element of node[1]) {
+            set.innerHTML += "<input type='button' value='Registrieren' name='" + element + "'> ";
+            set.innerHTML += "<label for='" + element + "'>" + element + "</label><br>";
+        }
+        f.appendChild(set);
+    }
+    for (let e of $("input", f)) {
+        e.addEventListener("click", pvRegister);
+    }
+}
+
+function pvRegister(event) {
+    let t = event.target;
+    let p = t.parentNode;
+    let n = $("fieldset", t.form).indexOf(p);
+    let e = $("input", p).indexOf(t);
+    t.value = 0;
+    t.type = "number";
+    //t.disabled = true;
+    ws.send("[6,[" + n + "," + e + "]]");
+}
+
+function gotPv(pv) {
+    let f = $("#pvs")[0];
+    let n = $("fieldset", f)[pv[0]];
+    let e = $("input", n)[pv[1]];
+    e.value = pv[3];
+    e.dispatchEvent(new Event("change"));
 }
 
 function clearLog() {
-    let log = $("#log")[0];
-    while (log.firstChild) {
-        log.removeChild(log.firstChild);
-    }
+    empty($("#log")[0]);
 }
