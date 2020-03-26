@@ -35,9 +35,9 @@ function processMessage(event) {
             undefined,
             gotStatus,
             gotLog,
-            undefined,
+            undefined, // keine Befehle empfangbar
             settingResponse,
-            gotParameter,
+            parameterResponse,
             gotPv,
             gotCommandList,
             gotSettingList,
@@ -94,23 +94,23 @@ function gotLog(message) {
     log.prepend(line);
 }
 
-function gotParameter(parameter) {
-    console.log(parameter);
-    return;
-}
-
-function gotCommandList(commands) {
-    let f = $("#commands")[0];
-    empty(f);
-    for (let node of commands) {
+function genericCreateForm(json, form, type, value, label) {
+    empty(form);
+    for (let node of json) {
         let set = document.createElement("fieldset");
         set.name = node[0];
         set.innerHTML = "<legend>" + node[0] + "</legend>";
         for (let element of node[1]) {
-            set.innerHTML += "<input type='button' value='" + element + "' name='" + element + "'> ";
+            set.innerHTML += "<input type='" + type + "' name='" + element + "' value='" + (value ? value : element) + "'> ";
+            if (label) set.innerHTML += "<label for='" + element + "'>" + element + "</label><br>";
         }
-        f.appendChild(set);
+        form.appendChild(set);
     }
+}
+
+function gotCommandList(commands) {
+    let f = $("#commands")[0];
+    genericCreateForm(commands, f, "button", undefined, false);
     f.addEventListener("click", commandClick, true);
 }
 
@@ -124,26 +124,9 @@ function commandClick(event) {
 
 function gotSettingList(settings) {
     let f = $("#settings")[0];
-    empty(f);
-    for (let node of settings) {
-        let set = document.createElement("fieldset");
-        set.name = node[0];
-        set.innerHTML = "<legend>" + node[0] + "</legend>";
-        for (let element of node[1]) {
-            set.innerHTML += "<input type='number' name='" + element + "'> ";
-            set.innerHTML += "<label for='" + element + "'>" + element + "</label><br>";
-        }
-        f.appendChild(set);
-    }
-    $("input", f).forEach(settingRequest);
-    f.addEventListener("blur", settingBlur, true);
-}
-
-function settingRequest(i) {
-    let p = i.parentNode;
-    let n = $("fieldset", i.form).indexOf(p);
-    let e = $("input", p).indexOf(i);
-    ws.send("[4,[" + n + "," + e + "]]");
+    genericCreateForm(settings, f, "number", "0", true);
+    $("input", f).forEach(valueRequest);
+    f.addEventListener("blur", valueBlur, true);
 }
 
 function settingResponse(setting) {
@@ -154,7 +137,29 @@ function settingResponse(setting) {
     e.value = setting[3];
 }
 
-function settingBlur(event) {
+function gotParameterList(parameters) {
+    let f = $("#parameters")[0];
+    genericCreateForm(parameters, f, "number", "", true);
+    $("input", f).forEach(valueRequest);
+    f.addEventListener("blur", valueBlur, true);
+}
+
+function parameterResponse(parameter) {
+    let f = $("#parameters")[0];
+    let n = $("fieldset", f)[parameter[0]];
+    let e = $("input", n)[parameter[1]];
+    e.setAttribute("qType", parameter[2]);
+    e.value = parameter[3];
+}
+
+function valueRequest(i) {
+    let p = i.parentNode;
+    let n = $("fieldset", i.form).indexOf(p);
+    let e = $("input", p).indexOf(i);
+    ws.send("[" + (i.form.id == "settings" ? 4 : 5) + ",[" + n + "," + e + "]]");
+}
+
+function valueBlur(event) {
     let t = event.target;
     let p = t.parentNode;
     let n = $("fieldset", t.form).indexOf(p);
@@ -171,26 +176,12 @@ function settingBlur(event) {
         default:
             return;
     }
-    ws.send("[4,[" + n + "," + e + "," + t.value + "]]");
-}
-
-function gotParameterList(parameters) {
-    gotCommandList(parameters);
+    ws.send("[" + (t.form.id == "settings" ? 4 : 5) + ",[" + n + "," + e + "," + t.value + "]]");
 }
 
 function gotPvList(pvs) {
     let f = $("#pvs")[0];
-    empty(f);
-    for (let node of pvs) {
-        let set = document.createElement("fieldset");
-        set.name = node[0];
-        set.innerHTML = "<legend>" + node[0] + "</legend>";
-        for (let element of node[1]) {
-            set.innerHTML += "<input type='button' value='Registrieren' name='" + element + "'> ";
-            set.innerHTML += "<label for='" + element + "'>" + element + "</label><br>";
-        }
-        f.appendChild(set);
-    }
+    genericCreateForm(pvs, f, "button", "Registrieren", true);
     for (let e of $("input", f)) {
         e.addEventListener("click", pvRegister);
     }
@@ -211,7 +202,12 @@ function gotPv(pv) {
     let f = $("#pvs")[0];
     let n = $("fieldset", f)[pv[0]];
     let e = $("input", n)[pv[1]];
-    e.value = pv[3];
+    if (pv[2] == 0) {
+        e.type = "text";
+        e.value = (new Date()).toLocaleTimeString();
+    } else {
+        e.value = pv[3];
+    }
     e.dispatchEvent(new Event("change"));
 }
 
