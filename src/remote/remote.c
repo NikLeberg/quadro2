@@ -248,8 +248,8 @@ extern char _binary_src_remote_www_index_min_html_start;
 extern char _binary_src_remote_www_index_min_html_end;
 extern char _binary_src_remote_www_manifest_json_start;
 extern char _binary_src_remote_www_manifest_json_end;
-extern char _binary_src_remote_www_favicon_ico_gz_start;
-extern char _binary_src_remote_www_favicon_ico_gz_end;
+extern char _binary_src_remote_www_favicon_svg_gz_start;
+extern char _binary_src_remote_www_favicon_svg_gz_end;
 extern char _binary_src_remote_www_script_min_js_start;
 extern char _binary_src_remote_www_script_min_js_end;
 
@@ -260,7 +260,7 @@ HttpdBuiltInUrl builtInUrls[] = {
     ROUTE_CGI_ARG2("/", remote_sendEmbedded, &_binary_src_remote_www_index_min_html_start, &_binary_src_remote_www_index_min_html_end),
     ROUTE_CGI_ARG2("/index.html", remote_sendEmbedded, &_binary_src_remote_www_index_min_html_start, &_binary_src_remote_www_index_min_html_end),
     ROUTE_CGI_ARG2("/manifest.json", remote_sendEmbedded, &_binary_src_remote_www_manifest_json_start, &_binary_src_remote_www_manifest_json_end),
-    ROUTE_CGI_ARG2("/favicon.ico", remote_sendEmbedded, &_binary_src_remote_www_favicon_ico_gz_start, &_binary_src_remote_www_favicon_ico_gz_end),
+    ROUTE_CGI_ARG2("/favicon.svg", remote_sendEmbedded, &_binary_src_remote_www_favicon_svg_gz_start, &_binary_src_remote_www_favicon_svg_gz_end),
     ROUTE_CGI_ARG2("/script.js", remote_sendEmbedded, &_binary_src_remote_www_script_min_js_start, &_binary_src_remote_www_script_min_js_end),
     ROUTE_END()
 };
