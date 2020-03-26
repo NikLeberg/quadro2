@@ -89,8 +89,9 @@ typedef enum {
 /** Einstellungen **/
 
 typedef enum {
+    SENSOR_SETTING_TIMEOUT = 0,
     // Fuse Z
-    SENSORS_SETTING_FUSE_Z_ERROR_ACCELERATION = 0,
+    SENSORS_SETTING_FUSE_Z_ERROR_ACCELERATION,
     SENSORS_SETTING_FUSE_Z_ERROR_ULTRASONIC,
     SENSORS_SETTING_FUSE_Z_ERROR_BAROMETER,
     SENSORS_SETTING_FUSE_Z_ERROR_GPS,
@@ -115,7 +116,8 @@ typedef enum {
 /** Prozessvariablen **/
 
 typedef enum {
-    SENSORS_PV_X = 0,
+    SENSORS_PV_TIMEOUT = 0,
+    SENSORS_PV_X,
     SENSORS_PV_VX,
     SENSORS_PV_Y,
     SENSORS_PV_VY,

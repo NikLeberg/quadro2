@@ -65,6 +65,8 @@
 /** Variablendeklaration **/
 
 struct sensors_t {
+    uint32_t timeout; // in us;
+
     struct { // Fusion der Z Achse (Altitude)
         eekf_context ekf;
         eekf_mat x, P, z;
@@ -107,6 +109,8 @@ static command_t sensors_commands[SENSORS_COMMAND_MAX] = {
 static COMMAND_LIST("sensors", sensors_commands, SENSORS_COMMAND_MAX);
 
 static setting_t sensors_settings[SENSORS_SETTING_MAX] = {
+    SETTING("timeout",          &sensors.timeout,               VALUE_TYPE_UINT),
+
     SETTING("zErrAccel",        &sensors.Z.errorAcceleration,   VALUE_TYPE_FLOAT),
     SETTING("zErrUltrasonic",   &sensors.Z.errorUltrasonic,     VALUE_TYPE_FLOAT),
     SETTING("zErrBarometer",    &sensors.Z.errorBarometer,      VALUE_TYPE_FLOAT),
@@ -126,6 +130,7 @@ static setting_t sensors_settings[SENSORS_SETTING_MAX] = {
 static SETTING_LIST("sensors", sensors_settings, SENSORS_SETTING_MAX);
 
 static pv_t sensors_pvs[SENSORS_PV_MAX] = {
+    PV("timeout", VALUE_TYPE_UINT),
     PV("x", VALUE_TYPE_FLOAT),
     PV("vx", VALUE_TYPE_FLOAT),
     PV("y", VALUE_TYPE_FLOAT),
@@ -150,6 +155,7 @@ void sensors_task(void* arg);
 // ToDo
 static void sensors_processCommand(sensors_command_t command);
 static void sensors_processData(sensors_event_t *event);
+static void sensors_detectTimeout(int64_t timestamp);
 static void sensors_fuseZ_reset();
 static void sensors_fuseZ(sensors_event_type_t type, float z, int64_t timestamp);
 eekf_return sensors_fuseZ_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const *x, eekf_mat const *u, void* userData);
@@ -319,6 +325,17 @@ static void sensors_processData(sensors_event_t *event) {
         default:
             break;
     }
+    sensors_detectTimeout(event->timestamp); // funktioniert solange mindestens ein Sensor Daten schickt 
+}
+
+static void sensors_detectTimeout(int64_t timestamp) {
+    for (uint32_t i = 0; i < SENSORS_MAX; ++i) {
+        if (sensors.states[i] && ((timestamp - sensors.states[i]->timestamp) > sensors.timeout)) {
+            pvPublishUint(xSensors, SENSORS_PV_TIMEOUT, i);
+            sensors.states[i]->timestamp = timestamp;
+        }
+    }
+    
 }
 
 
