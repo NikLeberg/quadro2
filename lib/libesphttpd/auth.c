@@ -51,7 +51,7 @@ CgiStatus ICACHE_FLASH_ATTR authBasic(HttpdConnData *connData) {
 	httpdHeader(connData, "Content-Type", "text/plain");
 	httpdHeader(connData, "WWW-Authenticate", "Basic realm=\""HTTP_AUTH_REALM"\"");
 	httpdEndHeaders(connData);
-	httpdSend(connData, unauthorized, -1);
+	httpdSend(connData, unauthorized, sizeof(unauthorized));
 	//Okay, all done.
 	return HTTPD_CGI_DONE;
 }

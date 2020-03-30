@@ -240,22 +240,22 @@ void ICACHE_FLASH_ATTR httpdStartResponse(HttpdConnData *conn, int code) {
 
 #ifdef CONFIG_ESPHTTPD_CORS_SUPPORT
     // CORS headers
-    httpdSend(conn, "Access-Control-Allow-Origin: *\r\n", -1);
-    httpdSend(conn, "Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS\r\n", -1);
+    httpdSend(conn, "Access-Control-Allow-Origin: *\r\n", 32);
+    httpdSend(conn, "Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS\r\n", 59);
 #endif
 }
 
 //Send a http header.
 void ICACHE_FLASH_ATTR httpdHeader(HttpdConnData *conn, const char *field, const char *val) {
     httpdSend(conn, field, -1);
-    httpdSend(conn, ": ", -1);
+    httpdSend(conn, ": ", 2);
     httpdSend(conn, val, -1);
-    httpdSend(conn, "\r\n", -1);
+    httpdSend(conn, "\r\n", 2);
 }
 
 //Finish the headers.
 void ICACHE_FLASH_ATTR httpdEndHeaders(HttpdConnData *conn) {
-    httpdSend(conn, "\r\n", -1);
+    httpdSend(conn, "\r\n", 2);
     conn->priv.flags|=HFL_SENDINGBODY;
 }
 
@@ -264,7 +264,7 @@ void ICACHE_FLASH_ATTR httpdRedirect(HttpdConnData *conn, const char *newUrl) {
     httpdStartResponse(conn, 302);
     httpdHeader(conn, "Location", newUrl);
     httpdEndHeaders(conn);
-    httpdSend(conn, "Moved to ", -1);
+    httpdSend(conn, "Moved to ", 9);
     httpdSend(conn, newUrl, -1);
 }
 
@@ -275,7 +275,7 @@ static CgiStatus ICACHE_FLASH_ATTR cgiNotFound(HttpdConnData *connData) {
     {
         httpdStartResponse(connData, 404);
         httpdEndHeaders(connData);
-        httpdSend(connData, "404 File not found.", -1);
+        httpdSend(connData, "404 File not found.", 19);
         return HTTPD_CGI_DONE;
     }
     return HTTPD_CGI_MORE; // make sure to eat-up all the post data that the client may be sending!
@@ -786,7 +786,7 @@ CallbackStatus ICACHE_FLASH_ATTR httpdRecvCb(HttpdInstance *pInstance, HttpdConn
     char *p, *e;
     CallbackStatus status = CallbackSuccess;
     httpdPlatLock(pInstance);
-
+    
     conn->priv.sendBuffLen=0;
 #ifdef CONFIG_ESPHTTPD_CORS_SUPPORT
     conn->priv.corsToken[0] = 0;

@@ -104,7 +104,7 @@ CgiStatus ICACHE_FLASH_ATTR cgiEspVfsGet(HttpdConnData *connData) {
 			httpdGetHeader(connData, "Accept-Encoding", acceptEncodingBuffer, 64);
 			if (strstr(acceptEncodingBuffer, "gzip") == NULL) {
 				//No Accept-Encoding: gzip header present
-				httpdSend(connData, gzipNonSupportedMessage, -1);
+				httpdSend(connData, gzipNonSupportedMessage, sizeof(gzipNonSupportedMessage));
 				fclose(file);
 				ESP_LOGD(__func__, "fclose: %s, r", filename);
 				ESP_LOGE(__func__, "client does not accept gzip!");
