@@ -270,7 +270,11 @@ static bool gps_sendUBX(uint8_t *buffer, uint8_t length, bool aknowledge, TickTy
     // AK / NAK
     if (!aknowledge) return false; // kein AK erforderlich
     uint8_t akPayload[2];
-    if (timeout != portMAX_DELAY) timeout -= xTaskGetTickCount() - startTick;
+    if (timeout != portMAX_DELAY) {
+        TickType_t dTick = xTaskGetTickCount() - startTick;
+        if (dTick >= timeout) timeout = 0;
+        else timeout -= dTick;
+    }
     if (gps_receiveUBX(akPayload, 0x05, 0x01, 2, timeout)) return true;
     if (akPayload[0] == buffer[2] && akPayload[1] == buffer[3]) return false;
     else return true;
@@ -283,7 +287,11 @@ static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t
         sync = xRingbufferReceiveUpTo(xGps, NULL, timeout, 1);
         if (!sync) return true; // timeout
         vRingbufferReturnItem(xGps, sync);
-        if (timeout != portMAX_DELAY) timeout -= xTaskGetTickCount() - startTick;
+        if (timeout != portMAX_DELAY) {
+            TickType_t dTick = xTaskGetTickCount() - startTick;
+            if (dTick >= timeout) timeout = 0;
+            else timeout -= dTick;
+        }
     } while (*sync != 0xb5);
     size_t rxLength = 0;
     uint8_t *rx = xRingbufferReceiveUpTo(xGps, &rxLength, timeout, length + 7);
