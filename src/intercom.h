@@ -12,22 +12,24 @@
  *  - Befehl ausführen
  * 
  * SETTING:
- *  - kein wirklicher Input, sondern der Wert wird direkt geändert
- *  - permanente Einstellungen
+ *  - direkt veränderbare Einstellungen
+ *  - Task wird nicht informiert
+ *  - permanent gespeichert
  * 
  * PARAMETER:
- *  - kein wirklicher Input, sondern der Wert wird direkt geändert
- *  - nicht permanenter Wert
+ *  - direkt veränderbarer Parameter
+ *  - wird nicht gespeichert
  * 
  * PV:
  *  - Prozessvariable
  *  - Task bietet Variablen an
  *  - Task aktualisiert Variabel und informiert registrierte Tasks
- *  - sozusagen Publish / Subscribe Funktionalität
+ *  - Publish / Subscribe Funktionalität
  *  - reine Events per VALUE_TYPE_NONE übermittelbar
  * 
  * INTERNAL:
  *  - für Taskinterne Events
+ *  - steht jedem Task frei wie diese genutzt werden sollen
  * 
  */
 
@@ -47,8 +49,8 @@
 
 typedef enum {
     EVENT_COMMAND = 0,
-    /* EVENT_SETTING,
-    EVENT_PARAMETER, */
+    // EVENT_SETTING,
+    EVENT_PARAMETER,
     EVENT_PV,
     EVENT_INTERNAL
 } event_type_t;
@@ -72,6 +74,10 @@ typedef union {
     float f;
     void *p;
 } value_t;
+
+_Static_assert(sizeof(void*) >= sizeof(uint32_t), "event_t::data muss als Datenspeicher missbraucht werden können.");
+_Static_assert(sizeof(void*) >= sizeof(int32_t), "event_t::data muss als Datenspeicher missbraucht werden können.");
+_Static_assert(sizeof(void*) >= sizeof(float), "event_t::data muss als Datenspeicher missbraucht werden können.");
 
 
 /*
