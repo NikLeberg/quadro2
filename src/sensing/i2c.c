@@ -20,6 +20,11 @@
 #include "resources.h"
 
 
+/** Variablendeklaration **/
+
+static SemaphoreHandle_t sI2C;
+
+
 /** Implementierung **/
 
 bool i2c_init(gpio_num_t scl, gpio_num_t sda) {
