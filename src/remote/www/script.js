@@ -11,7 +11,16 @@ function empty(e) {
 
 let ws;
 
-window.onload = init;
+window.addEventListener("load", function(event) {
+    init();
+    for (let p of $("#intercom > p")) {
+        p.addEventListener("click", function(event) {
+            let s = event.target.nextSibling.style;
+            if (s.display == "none") s.display = "inherit";
+            else s.display = "none";
+        });
+    }
+});
 
 function init() {
     ws = new WebSocket("ws:/" + window.location.hostname + "/ws");
@@ -139,7 +148,7 @@ function settingResponse(setting) {
 
 function gotParameterList(parameters) {
     let f = $("#parameters")[0];
-    genericCreateForm(parameters, f, "number", "", true);
+    genericCreateForm(parameters, f, "number", "0", true);
     $("input", f).forEach(valueRequest);
     f.addEventListener("blur", valueBlur, true);
 }
