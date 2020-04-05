@@ -41,9 +41,31 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin);
 /*
  * Function: bno_toWorldFrame
  * ----------------------------
- * Rotiere Vektor anhand zuletzt bekannter Orientierung (in Form eines Quaternions)
+ * Rotiere Vektor anhand Orientierung (in Form eines Quaternions)
  * vom Lokalen Referenzsystem in Weltkoordinaten.
  *
  * struct vector_t *vector: zu rotierender Vektor
+ * orientation_t *quaternion: Quaternion für Rotation, bei NULL wird interner Quaternion benutzt
  */
-void bno_toWorldFrame(vector_t *vector);
+void bno_toWorldFrame(vector_t *vector, orientation_t *quaternion);
+
+/*
+ * Function: bno_toLocalFrame
+ * ----------------------------
+ * Rotiere Vektor anhand Orientierung (in Form eines Quaternions)
+ * von Weltkoordinaten in Lokales Referenzsystem.
+ *
+ * struct vector_t *vector: zu rotierender Vektor
+ * orientation_t *quaternion: Quaternion für Rotation, bei NULL wird interner Quaternion benutzt
+ */
+void bno_toLocalFrame(vector_t *vector, orientation_t *quaternion);
+
+/*
+ * Function: bno_toEuler
+ * ----------------------------
+ * Rechne Quaternion der Orientierung in Eulerwinkel Roll (x), Pitch (y), Heading (z) um.
+ *
+ * struct vector_t *vector: resultierende Eulerwinkel
+ * orientation_t *quaternion: Quaternion für Umrechnung, bei NULL wird interner Quaternion benutzt
+ */
+void bno_toEuler(vector_t *euler, orientation_t *quaternion);

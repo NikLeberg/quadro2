@@ -34,6 +34,10 @@
 
 /** Variablendeklaration **/
 
+#ifndef M_PI_2
+    #define M_PI_2 1.57079632679489661923
+#endif
+
 typedef struct {
     struct {
         int64_t timestamp;
@@ -203,10 +207,12 @@ void bno_task(void* arg) {
     }
 }
 
-void bno_toWorldFrame(vector_t *vector) {
+void bno_toWorldFrame(vector_t *vector, orientation_t *quaternion) {
     // (q.r * q.r - dot(q, q)) * v + 2.0f * dot(q, v) * q + 2.0f * q.r * cross(q, v);
     vector_t v = *vector;
-    orientation_t q = bno.orientation.orientation;
+    orientation_t q;
+    if (quaternion) q = *quaternion;
+    else q = bno.orientation.orientation;
     float factor;
 
     factor  = q.real * q.real;
@@ -234,6 +240,39 @@ void bno_toWorldFrame(vector_t *vector) {
     return;
 }
 
+void bno_toLocalFrame(vector_t *vector, orientation_t *quaternion) {
+    orientation_t q;
+    if (quaternion) q = *quaternion;
+    else q = bno.orientation.orientation;
+    // Invertiere Quaternion mittels Conjugate. Normalisierung nicht nötig da Einheitsquaternion.
+    // Conjugate des Quaternions
+    q.i = -q.i;
+    q.j = -q.j;
+    q.k = -q.k;
+    bno_toWorldFrame(vector, &q);
+}
+
+// https://math.stackexchange.com/questions/2975109/how-to-convert-euler-angles-to-quaternions-and-get-the-same-euler-angles-back-fr
+void bno_toEuler(vector_t *euler, orientation_t *quaternion) {
+    orientation_t q;
+    if (quaternion) q = *quaternion;
+    else q = bno.orientation.orientation;
+    float i2 = q.i * q.i;
+    float j2 = q.j * q.j;
+    float k2 = q.k * q.k;
+    float t0 = 2.0f * (q.real * q.i + q.j * q.k);
+    float t1 = 1.0f - 2.0f * (i2 + j2);
+    euler->x = atan2f(t0, t1); // roll
+    float t2 = 2.0f * (q.real * q.j - q.k * q.i);
+    if (t2 > 1.0f) t2 = 1.0f;
+    if (t2 < -1.0f) t2 = -1.0f;
+    euler->y = asinf(t2); // pitch
+    float t3 = 2.0f * (q.real * q.k + q.i * q.j);
+    float t4 = 1.0f - 2.0f * (j2 + k2);
+    euler->z = atan2f(t3, t4); // yaw
+    return;
+}
+
 static bool bno_sensorEnable(sh2_SensorId_t sensorId, uint32_t interval_us) {
     sh2_SensorConfig_t config;
     config.changeSensitivityEnabled = false;
@@ -257,7 +296,7 @@ static void bno_sensorEvent(void * cookie, sh2_SensorEvent_t *event) {
             v.x = value.un.linearAcceleration.x;
             v.y = value.un.linearAcceleration.y;
             v.z = value.un.linearAcceleration.z;
-            bno_toWorldFrame(&v);
+            bno_toWorldFrame(&v, NULL);
             bno.acceleration.vector = v;
             bno.acceleration.accuracy = value.status & 0b00000011;
             bno.acceleration.timestamp = value.timestamp;

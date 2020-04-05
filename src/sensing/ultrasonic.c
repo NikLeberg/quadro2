@@ -135,7 +135,7 @@ void ult_task(void* arg) {
         } else noGroundSince = 0;
         // Korrigieren gemäss aktueller Orientierung
         vector_t vector = {.x = 0.0f, .y = 0.0f, .z = -distance};
-        bno_toWorldFrame(&vector);
+        bno_toWorldFrame(&vector, NULL);
         distance = -vector.z;
         if (distance < 0.0f) continue; // durch Rechnung ungültig geworden
         ult.distance.vector.z = distance;
