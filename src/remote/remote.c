@@ -458,7 +458,7 @@ static void remote_messageProcess(char *message, size_t length) {
                         if (jPv && json_getType(jPublisher) == JSON_INTEGER && json_getType(jPv) == JSON_INTEGER) { // valid
                             pv_t *pv;
                             pv = intercom_pvSubscribe2(xRemote, json_getInteger(jPublisher), json_getInteger(jPv));
-                            if (pv) remote_pvForward(pv); // zuletzt bekannter Zustand schicken
+                            if (pv && pv->type != VALUE_TYPE_NONE) remote_pvForward(pv); // zuletzt bekannter Zustand schicken
                         }
                     }
                     break;
