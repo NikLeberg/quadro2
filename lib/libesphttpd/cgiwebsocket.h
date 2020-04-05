@@ -2,7 +2,6 @@
 #define CGIWEBSOCKET_H
 
 #include "httpd.h"
-#include "httpd-platform.h"
 
 #define WEBSOCK_FLAG_NONE 0
 #define WEBSOCK_FLAG_MORE (1<<0) //Set if the data is not the final data in the message; more follows

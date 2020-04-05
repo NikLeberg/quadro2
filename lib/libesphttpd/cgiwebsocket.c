@@ -9,6 +9,7 @@ Websocket support for esphttpd. Inspired by https://github.com/dangrie158/ESP-82
 #include <esp.h>
 
 #include "httpd.h"
+#include "httpd-platform.h"
 #include "sha1.h"
 #include "libesphttpd_base64.h"
 #include "cgiwebsocket.h"
