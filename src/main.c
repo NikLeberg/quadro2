@@ -44,6 +44,7 @@
 #include "intercom.h"
 #include "sensing/sensors.h"
 #include "remote/remote.h"
+#include "controlling/control.h"
 #include "info/info.h"
 
 // Pins
@@ -58,11 +59,9 @@
 #define LED_I2C             GPIO_NUM_22
 
 // Bugs:
-// - GPS bleibt machnmal im init hängen? nach interrupt 35 allokieren
 // - Sensors X rechnet noch nicht mit Geschwindigkeit vom GPS
-// - NVS speichert einstellungen nicht?
 // - libesphttpd besser portieren
-// - ws versendet bis zu 3x eine Nachricht
+// - lib\ringbuf\ringbuf.c führt oft zu Watchdog Timeout im ISR, aber nur jeder "zweiter" Start
 
 typedef enum {
     MAIN_PV_TICKS,
@@ -95,6 +94,10 @@ void app_main(void* arg) {
     ESP_LOGI("quadro2", "Starte Remote...");
     ret = remote_init("OnePlus 5", "Testing1234");
     ESP_LOGI("quadro2", "Status Remote: %s", ret ? "Error" : "Ok");
+
+    ESP_LOGI("quadro2", "Starte Control...");
+    ret = control_init(0, 0, 0, 0);
+    ESP_LOGI("quadro2", "Status Control: %s", ret ? "Error" : "Ok");
 
     // ESP_LOGI("quadro2", "Starte Info...");
     // ret = info_init(LED_I2C, 0x00);
