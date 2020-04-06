@@ -159,8 +159,8 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin) {
     vSemaphoreDelete(sInitDone);
     // Standartsensoren aktivieren (Intervall so schnell wie möglich)
     if (sh2_setSensorCallback(&bno_sensorEvent, NULL)) return true;
-    if (bno_sensorEnable(SH2_ROTATION_VECTOR, BNO_DATA_RATE_IMU_US)) return true;
-    if (bno_sensorEnable(SH2_LINEAR_ACCELERATION, BNO_DATA_RATE_IMU_US)) return true;
+    if (bno_sensorEnable(SH2_ROTATION_VECTOR, BNO_DATA_RATE_QUAT_US)) return true;
+    if (bno_sensorEnable(SH2_LINEAR_ACCELERATION, BNO_DATA_RATE_ACCEL_US)) return true;
     if (bno_sensorEnable(SH2_PRESSURE, BNO_DATA_RATE_PRESSURE_US)) return true;
     return false;
 }
@@ -172,7 +172,7 @@ void bno_task(void* arg) {
     uint8_t timeoutCount = 0;
     // Loop
     while (true) {
-        if (xQueueReceive(xBno, &event, (BNO_DATA_RATE_IMU_US / 1000 / portTICK_PERIOD_MS) + 1) == pdTRUE) {
+        if (xQueueReceive(xBno, &event, (BNO_DATA_RATE_QUAT_US / 1000 / portTICK_PERIOD_MS) + 1) == pdTRUE) {
             // ist sh2-Lib registriert?
             if (!bno.onRx) continue;
             // Datenlänge berechnen, mindestens Header, maximal MAX_TRANSFER

@@ -57,11 +57,16 @@
 #define GPS_RX_HOST_TX      GPIO_NUM_17
 #define GPS_TX_HOST_RX      GPIO_NUM_16
 #define LED_I2C             GPIO_NUM_22
+#define MOTOR_FRONT_LEFT    GPIO_NUM_4
+#define MOTOR_FRONT_RIGHT   GPIO_NUM_0
+#define MOTOR_BACK_LEFT     GPIO_NUM_2
+#define MOTOR_BACK_RIGHT    GPIO_NUM_15
 
 // Bugs:
 // - Sensors X rechnet noch nicht mit Geschwindigkeit vom GPS
 // - libesphttpd besser portieren
 // - lib\ringbuf\ringbuf.c führt oft zu Watchdog Timeout im ISR, aber nur jeder "zweiter" Start
+// - eigenständiger restart nach: "V (4222) esp_adapter: thread sem get: sem=0x3ffd5808"
 
 typedef enum {
     MAIN_PV_TICKS,
@@ -96,7 +101,7 @@ void app_main(void* arg) {
     ESP_LOGI("quadro2", "Status Remote: %s", ret ? "Error" : "Ok");
 
     ESP_LOGI("quadro2", "Starte Control...");
-    ret = control_init(0, 0, 0, 0);
+    ret = control_init(MOTOR_FRONT_LEFT, MOTOR_FRONT_RIGHT, MOTOR_BACK_LEFT, MOTOR_BACK_RIGHT);
     ESP_LOGI("quadro2", "Status Control: %s", ret ? "Error" : "Ok");
 
     // ESP_LOGI("quadro2", "Starte Info...");

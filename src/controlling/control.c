@@ -32,6 +32,7 @@
 #include "sensing/sensor_types.h"
 #include "sensing/sensors.h"
 #include "sensing/bno.h"
+#include "remote/remote.h" // Intercom-Events
 #include "control.h"
 
 
@@ -203,12 +204,8 @@ static void control_pidReset(control_pid_t *pid);
  * Function: control_stabilize
  * ----------------------------
  * Stabilisiert auf gewünschte Eulerwinkel mittles PID-Regler.
- *
- * float throttle: grundlegender Throttle
- * float setpoints[AXIS_MAX]: Sollwert in Eulerwinkel Roll, Pitch, Heading
- * float eulers[AXIS_MAX]: Istwert in Eulerwinkel Roll, Pitch, Heading
  */
-static void control_stabilize(float throttle, vector_t setpoint, vector_t euler);
+static void control_stabilize();
 
 /*
  * Function: control_motorsThrottle
@@ -233,13 +230,36 @@ bool control_init(gpio_num_t motorFrontLeft, gpio_num_t motorFrontRight,
     settingRegister(xControl, control_settings);
     parameterRegister(xControl, control_parameters);
     pvRegister(xControl, control_pvs);
-    // Motoren initialisieren
-    bool ret = false;
+    // LEDC als Motortreiber initialisieren
     ESP_LOGD("control", "Motors init");
-    // ret = ;
+    bool ret = false;
+    ledc_timer_config_t ledcConfig = {
+        speed_mode:         LEDC_HIGH_SPEED_MODE,
+        {duty_resolution:   LEDC_TIMER_20_BIT},
+        timer_num:          LEDC_TIMER_0,
+        freq_hz:            50
+    };
+    ret = ledc_timer_config(&ledcConfig);
+    ledc_channel_config_t ledcChannel = {
+        speed_mode: LEDC_HIGH_SPEED_MODE,
+        intr_type:  LEDC_INTR_DISABLE,
+        timer_sel:  LEDC_TIMER_0,
+        duty:       CONTROL_MOTOR_DUTY_MIN,
+        hpoint:     0
+    };
+    ledcChannel.channel = LEDC_CHANNEL_0;
+    ledcChannel.gpio_num = motorFrontLeft;
+    ret |= ledc_channel_config(&ledcChannel);
+    ledcChannel.channel = LEDC_CHANNEL_1;
+    ledcChannel.gpio_num = motorFrontRight;
+    ret |= ledc_channel_config(&ledcChannel);
+    ledcChannel.channel = LEDC_CHANNEL_2;
+    ledcChannel.gpio_num = motorBackLeft;
+    ret |= ledc_channel_config(&ledcChannel);
+    ledcChannel.channel = LEDC_CHANNEL_3;
+    ledcChannel.gpio_num = motorBackRight;
+    ret |= ledc_channel_config(&ledcChannel);
     ESP_LOGD("control", "Motors %s", ret ? "error" : "ok");
-    // ...
-    // für PV-Empfang registrieren
     // installiere task
     if (xTaskCreate(&control_task, "control", 1 * 1024, NULL, xControl_PRIORITY, NULL) != pdTRUE) return true;
     return ret;
@@ -252,6 +272,10 @@ void control_task(void* arg) {
     // Variablen
     event_t event;
     TickType_t timeout = 0;
+    // PVs empfangen
+    pv_t *pvRemoteConnection = intercom_pvSubscribe(xControl, xRemote, REMOTE_PV_CONNECTIONS); // UInt
+    pv_t *pvRemoteTimeout = intercom_pvSubscribe(xControl, xRemote, REMOTE_PV_TIMEOUT); // Event
+    pv_t *pvSensorsOrientation = intercom_pvSubscribe(xControl, xSensors, SENSORS_PV_ORIENTATION); // Event
     // Loop
     while (true) {
         if (xQueueReceive(xControl, &event, 1) == pdTRUE) {
@@ -259,8 +283,15 @@ void control_task(void* arg) {
                 case (EVENT_COMMAND): // Befehl erhalten
                     control_processCommand((control_command_t)event.data);
                     break;
-                case (EVENT_PV): // Istwert-Änderung
+                case (EVENT_PV): { // Istwert-Änderung
+                    pv_t *pv = event.data;
+                    if (pv == pvSensorsOrientation) {
+                        control_stabilize();
+                    } else {
+                        control_processCommand(CONTROL_COMMAND_DISARM);
+                    }
                     break;
+                }
                 case (EVENT_INTERNAL):
                 default:
                     // ungültig
@@ -275,12 +306,7 @@ void control_task(void* arg) {
         if (timeout) --timeout;
         else {
             timeout = 500 / portTICK_PERIOD_MS;
-            vector_t euler;
-            bno_toEuler(&euler, NULL);
-            pvPublishFloat(xControl, CONTROL_PV_ROLL, euler.x * (180.0f / M_PI));
-            pvPublishFloat(xControl, CONTROL_PV_PITCH, euler.y * (180.0f / M_PI));
-            pvPublishFloat(xControl, CONTROL_PV_HEADING, euler.z * (180.0f / M_PI));
-            control_stabilize(control.throttle, control.setpoints.euler, euler);
+            ;
         }
     }
 }
@@ -289,14 +315,18 @@ static void control_processCommand(control_command_t command) {
     switch (command) {
         case (CONTROL_COMMAND_DISARM):
             control.armed = false;
+            ledc_stop(LEDC_HIGH_SPEED_MODE, 0, CONTROL_MOTOR_DUTY_MIN);
+            ledc_stop(LEDC_HIGH_SPEED_MODE, 1, CONTROL_MOTOR_DUTY_MIN);
+            ledc_stop(LEDC_HIGH_SPEED_MODE, 2, CONTROL_MOTOR_DUTY_MIN);
+            ledc_stop(LEDC_HIGH_SPEED_MODE, 3, CONTROL_MOTOR_DUTY_MIN);
             pvPublishUint(xControl, CONTROL_PV_ARMED, 0);
-            control_processCommand(CONTROL_RESET_STABILIZE_PID);
+            control_processCommand(CONTROL_COMMAND_RESET_STABILIZE_PID);
             break;
         case (CONTROL_COMMAND_ARM):
             control.armed = true;
             pvPublishUint(xControl, CONTROL_PV_ARMED, 1);
             break;
-        case (CONTROL_RESET_STABILIZE_PID):
+        case (CONTROL_COMMAND_RESET_STABILIZE_PID):
             control_pidReset(&control.pids.stabilize[AXIS_ROLL]);
             control_pidReset(&control.pids.stabilize[AXIS_PITCH]);
             control_pidReset(&control.pids.stabilize[AXIS_HEADING]);
@@ -364,19 +394,25 @@ static void control_direction(float throttle, vector_t setpoint, vector_t veloci
     control_stabilize(throttle, gain, euler);
 }
 
-static void control_stabilize(float throttle, vector_t setpoint, vector_t euler) {
+static void control_stabilize() {
+    // aktuelle Orientierung (Istwert)
+    vector_t euler;
+    bno_toEuler(&euler, NULL);
+    pvPublishFloat(xControl, CONTROL_PV_ROLL, euler.x * (180.0f / M_PI));
+    pvPublishFloat(xControl, CONTROL_PV_PITCH, euler.y * (180.0f / M_PI));
+    pvPublishFloat(xControl, CONTROL_PV_HEADING, euler.z * (180.0f / M_PI));
     // rechne pids
     TickType_t tick = xTaskGetTickCount();
     vector_t gain; // - 1.0 bis + 1.0
-    for (control_axes_t i = 0; i < 3 ; ++i) { // roll, pitch, heading
-        gain.v[i] = control_pidCalculate(&control.pids.stabilize[i], setpoint.v[i], euler.v[i], tick);
+    for (control_axes_t i = 0; i < 3; ++i) { // roll, pitch, heading
+        gain.v[i] = control_pidCalculate(&control.pids.stabilize[i], control.setpoints.euler.v[i], euler.v[i], tick);
     }
     // throttle rechnen
     float throttles[MOTOR_MAX];
-    throttles[MOTOR_FRONT_LEFT] =   gain.x - gain.y + gain.z + throttle;
-    throttles[MOTOR_FRONT_RIGHT] = -gain.x - gain.y - gain.z + throttle;
-    throttles[MOTOR_BACK_LEFT]  =   gain.x + gain.y - gain.z + throttle;
-    throttles[MOTOR_BACK_RIGHT] =  -gain.x + gain.y + gain.z + throttle;
+    throttles[MOTOR_FRONT_LEFT] =   gain.x - gain.y + gain.z + control.throttle;
+    throttles[MOTOR_FRONT_RIGHT] = -gain.x - gain.y - gain.z + control.throttle;
+    throttles[MOTOR_BACK_LEFT]  =   gain.x + gain.y - gain.z + control.throttle;
+    throttles[MOTOR_BACK_RIGHT] =  -gain.x + gain.y + gain.z + control.throttle;
     control_motorsThrottle(throttles);
 }
 
@@ -386,12 +422,13 @@ static void control_motorsThrottle(float throttle[4]) {
         if (control.armed) {
             if (throttle[i] > 1.0f) throttle[i] = 1.0f;
             else if (throttle[i] < 0.0f) throttle[i] = 0.0f;
-            duty = throttle[i] * (2000 - 1000) + 1000;
+            duty = throttle[i] * (CONTROL_MOTOR_DUTY_MAX - CONTROL_MOTOR_DUTY_MIN) + CONTROL_MOTOR_DUTY_MIN;
+            if (control.setpoints.position.x) duty = control.setpoints.position.x;
         } else {
-            duty = 1000;
+            duty = CONTROL_MOTOR_DUTY_MIN;
         }
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, i, duty);
-        ledc_update_duty(LEDC_LOW_SPEED_MODE, i);
+        ledc_set_duty(LEDC_HIGH_SPEED_MODE, i, duty);
+        ledc_update_duty(LEDC_HIGH_SPEED_MODE, i);
         pvPublishUint(xControl, CONTROL_PV_DUTY_FRONT_LEFT + i, duty);
     }
 }

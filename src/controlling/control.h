@@ -23,13 +23,16 @@
 
 /** Compiler Einstellungen **/
 
+#define CONTROL_MOTOR_DUTY_MIN  ((0x1 << LEDC_TIMER_20_BIT) - 1) / 20
+#define CONTROL_MOTOR_DUTY_MAX  CONTROL_MOTOR_DUTY_MIN * 2
+
 
 /** Befehle **/
 
 typedef enum {
     CONTROL_COMMAND_DISARM = 0,
     CONTROL_COMMAND_ARM,
-    CONTROL_RESET_STABILIZE_PID,
+    CONTROL_COMMAND_RESET_STABILIZE_PID,
     CONTROL_COMMAND_MAX
 } control_command_t;
 

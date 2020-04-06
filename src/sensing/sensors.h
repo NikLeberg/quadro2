@@ -93,6 +93,7 @@ typedef enum {
 
 typedef enum {
     SENSORS_PV_TIMEOUT = 0,
+    SENSORS_PV_ORIENTATION,
     SENSORS_PV_X,
     SENSORS_PV_VX,
     SENSORS_PV_Y,

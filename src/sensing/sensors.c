@@ -132,6 +132,7 @@ static SETTING_LIST("sensors", sensors_settings, SENSORS_SETTING_MAX);
 
 static pv_t sensors_pvs[SENSORS_PV_MAX] = {
     PV("timeout", VALUE_TYPE_UINT),
+    PV("orientation", VALUE_TYPE_NONE),
     PV("x", VALUE_TYPE_FLOAT),
     PV("vx", VALUE_TYPE_FLOAT),
     PV("y", VALUE_TYPE_FLOAT),
@@ -300,6 +301,7 @@ static void sensors_processData(sensors_event_t *event) {
             break;
         case (SENSORS_ORIENTATION):
             // ESP_LOGI("sensors", "%llu,O,%f,%f,%f,%f,%f", event->timestamp, event->orientation.i, event->orientation.j, event->orientation.k, event->orientation.real, event->accuracy);
+            pvPublish(xSensors, SENSORS_PV_ORIENTATION);
             break;
         case (SENSORS_ALTIMETER):
             // ESP_LOGI("sensors", "%llu,B,%f,%f", event->timestamp, event->vector.z, event->accuracy);
