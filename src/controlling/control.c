@@ -80,6 +80,8 @@ struct control_t {
     bool armed;
     float throttle;
 
+    float throttleOverride;
+
     struct {
         vector_t euler;
         bool headingRate;
@@ -131,18 +133,19 @@ static parameter_t control_parameters[CONTROL_PARAMETER_MAX] = {
     PARAMETER("x",              &control.setpoints.position.x,  VALUE_TYPE_FLOAT),
     PARAMETER("y",              &control.setpoints.position.y,  VALUE_TYPE_FLOAT),
     PARAMETER("z",              &control.setpoints.position.z,  VALUE_TYPE_FLOAT),
+    PARAMETER("override",       &control.throttleOverride,      VALUE_TYPE_FLOAT)
 };
 static PARAMETER_LIST("control", control_parameters, CONTROL_PARAMETER_MAX);
 
 static pv_t control_pvs[CONTROL_PV_MAX] = {
-    PV("armed",             VALUE_TYPE_UINT),
-    PV("dutyFrontLeft",     VALUE_TYPE_UINT),
-    PV("dutyFrontRight",    VALUE_TYPE_UINT),
-    PV("dutyBackLeft",      VALUE_TYPE_UINT),
-    PV("dutyBackRight",     VALUE_TYPE_UINT),
-    PV("roll",              VALUE_TYPE_FLOAT),
-    PV("pitch",             VALUE_TYPE_FLOAT),
-    PV("heading",           VALUE_TYPE_FLOAT)
+    PV("armed",         VALUE_TYPE_UINT),
+    PV("frontLeft",     VALUE_TYPE_FLOAT),
+    PV("frontRight",    VALUE_TYPE_FLOAT),
+    PV("backLeft",      VALUE_TYPE_FLOAT),
+    PV("backRight",     VALUE_TYPE_FLOAT),
+    PV("roll",          VALUE_TYPE_FLOAT),
+    PV("pitch",         VALUE_TYPE_FLOAT),
+    PV("heading",       VALUE_TYPE_FLOAT)
 };
 static PV_LIST("control", control_pvs, CONTROL_PV_MAX);
 
@@ -261,7 +264,7 @@ bool control_init(gpio_num_t motorFrontLeft, gpio_num_t motorFrontRight,
     ret |= ledc_channel_config(&ledcChannel);
     ESP_LOGD("control", "Motors %s", ret ? "error" : "ok");
     // installiere task
-    if (xTaskCreate(&control_task, "control", 1 * 1024, NULL, xControl_PRIORITY, NULL) != pdTRUE) return true;
+    if (xTaskCreate(&control_task, "control", 2 * 1024, NULL, xControl_PRIORITY, NULL) != pdTRUE) return true;
     return ret;
 }
 
@@ -285,9 +288,15 @@ void control_task(void* arg) {
                     break;
                 case (EVENT_PV): { // Istwert-Änderung
                     pv_t *pv = event.data;
-                    if (pv == pvSensorsOrientation) {
-                        control_stabilize();
+                    if (pv == pvSensorsOrientation) control_stabilize();
+                    else if (pv == pvRemoteTimeout) {
+                        ESP_LOGD("control", "got timeout");
+                        control_processCommand(CONTROL_COMMAND_DISARM);
+                    } else if (pv == pvRemoteConnection) {
+                        ESP_LOGD("control", "got con");
+                        control_processCommand(CONTROL_COMMAND_DISARM);
                     } else {
+                        ESP_LOGD("control", "got unknown %p", pv);
                         control_processCommand(CONTROL_COMMAND_DISARM);
                     }
                     break;
@@ -418,17 +427,14 @@ static void control_stabilize() {
 
 static void control_motorsThrottle(float throttle[4]) {
     uint32_t duty;
-    for (control_motors_t i = 0; i < 4; ++i) {
-        if (control.armed) {
-            if (throttle[i] > 1.0f) throttle[i] = 1.0f;
-            else if (throttle[i] < 0.0f) throttle[i] = 0.0f;
-            duty = throttle[i] * (CONTROL_MOTOR_DUTY_MAX - CONTROL_MOTOR_DUTY_MIN) + CONTROL_MOTOR_DUTY_MIN;
-            if (control.setpoints.position.x) duty = control.setpoints.position.x;
-        } else {
-            duty = CONTROL_MOTOR_DUTY_MIN;
-        }
+    for (control_motors_t i = 0; i < MOTOR_MAX; ++i) {
+        if (control.throttleOverride) throttle[i] = control.throttleOverride;
+        if (!control.armed) throttle[i] = 0.0f;
+        if (throttle[i] > 1.0f) throttle[i] = 1.0f;
+        else if (throttle[i] < 0.0f) throttle[i] = 0.0f;
+        duty = throttle[i] * (CONTROL_MOTOR_DUTY_MAX - CONTROL_MOTOR_DUTY_MIN) + CONTROL_MOTOR_DUTY_MIN;
         ledc_set_duty(LEDC_HIGH_SPEED_MODE, i, duty);
         ledc_update_duty(LEDC_HIGH_SPEED_MODE, i);
-        pvPublishUint(xControl, CONTROL_PV_DUTY_FRONT_LEFT + i, duty);
+        pvPublishFloat(xControl, CONTROL_PV_THROTTLE_FRONT_LEFT + i, throttle[i]);
     }
 }
