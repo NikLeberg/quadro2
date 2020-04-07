@@ -47,8 +47,6 @@ static struct {
     event_t forward;
 } gps;
 
-static TaskHandle_t xGps;
-
 extern uart_dev_t UART0;
 extern uart_dev_t UART1;
 extern uart_dev_t UART2;
@@ -143,7 +141,7 @@ bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
     gps.speed.type = SENSORS_GROUNDSPEED;
     gps.forward.type = EVENT_INTERNAL;
     gps.rxSemphr = xSemaphoreCreateBinary();
-    gps.txSemphr = xSemaphoreCreateMutex();
+    gps.txSemphr = xSemaphoreCreateBinary();
     xSemaphoreGive(gps.txSemphr);
     // eigener UART Treiber installieren
     gps_uartEnable(gps.txPin, gps.rxPin);
@@ -188,7 +186,7 @@ bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
                         (GPS_DATA_RATE_MS >> 8), 0x01, 0x00, 0x00, 0x00, NULL, NULL};
     if (gps_sendUBX(msgRate, sizeof(msgRate), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
     // Task starten
-    if (xTaskCreate(&gps_task, "gps", 3 * 1024, NULL, xSensors_PRIORITY - 1, &xGps) != pdTRUE) return true;
+    if (xTaskCreate(&gps_task, "gps", 3 * 1024, NULL, xSensors_PRIORITY - 1, NULL) != pdTRUE) return true;
     return false;
 }
 
@@ -271,46 +269,53 @@ static bool gps_sendUBX(uint8_t *buffer, uint8_t length, bool aknowledge, TickTy
 
 static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t length, TickType_t timeout) {
     TickType_t startTick = xTaskGetTickCount();
-    if (UART[GPS_UART]->status.rxfifo_cnt < length + 8) { // nicht warten wenn noch genug bereit liegt
-        if (!ulTaskNotifyTake(pdTRUE, timeout)) return true;
-    }
-    uint8_t c = NULL;
-    size_t position = 0;
-    while (UART[GPS_UART]->status.rxfifo_cnt) {
-        c = UART[GPS_UART]->fifo.rw_byte;
-        switch (position) {
-            case (0): // Sync 1
-                if (c == 0xb5) position = 1;
-                else continue;
-            case (1): // Sync 2
-                if (c == 0x62) position = 2;
-                else position = 0;
-                break;
-            case (2): // Class
-                if (c == class) position = 3;
-                else position = 0;
-                break;
-            case (3): // ID
-                if (c == id) position = 4;
-                else position = 0;
-                break;
-            case (4): // Size LSB
-                if (c == (length & 0x00ff)) position = 5;
-                else position = 0;
-                break;
-            case (5): // Size MSB
-                if (c == (length >> 8)) position = 6;
-                else position = 0;
-                break;
-            default: // Payload
-                if (length--) {
-                    payload[position - 6] = c;
-                    ++position;
-                } else return false; // komplettes Frame empfangen, ckA & ckB sind noch im Buffer, nächster Aufruf kümmert sich drum
-                break;
+    while (timeout) {
+        if (timeout != portMAX_DELAY) {
+            TickType_t dTick = xTaskGetTickCount() - startTick;
+            if (dTick >= timeout) timeout = 0;
+            else timeout -= dTick;
+        }
+        UART[GPS_UART]->int_ena.rxfifo_tout = 1;
+        if (xSemaphoreTake(gps.rxSemphr, timeout) == pdFALSE) continue;
+        uint8_t c = NULL;
+        size_t position = 0;
+        while (UART[GPS_UART]->status.rxfifo_cnt) {
+            c = UART[GPS_UART]->fifo.rw_byte;
+            switch (position) {
+                case (0): // Sync 1
+                    if (c == 0xb5) position = 1;
+                    else continue;
+                    break;
+                case (1): // Sync 2
+                    if (c == 0x62) position = 2;
+                    else position = 0;
+                    break;
+                case (2): // Class
+                    if (c == class) position = 3;
+                    else position = 0;
+                    break;
+                case (3): // ID
+                    if (c == id) position = 4;
+                    else position = 0;
+                    break;
+                case (4): // Size LSB
+                    if (c == (length & 0x00ff)) position = 5;
+                    else position = 0;
+                    break;
+                case (5): // Size MSB
+                    if (c == (length >> 8)) position = 6;
+                    else position = 0;
+                    break;
+                default: // Payload
+                    if (length--) {
+                        payload[position - 6] = c;
+                        ++position;
+                    } else return false; // komplettes Frame empfangen, ckA & ckB sind noch im Buffer, nächster Aufruf kümmert sich drum
+                    break;
+            }
         }
     }
-    return true; // sollte nicht passieren
+    return true; // timeout
 }
 
 static void gps_interrupt(void* arg) {
@@ -318,14 +323,14 @@ static void gps_interrupt(void* arg) {
     BaseType_t woken = pdFALSE;
     uint32_t status = uart->int_st.val;
     uart->int_clr.val = status; // aktive Interrupts zurücksetzen
-    if (status & UART_TX_DONE_INT_ST_M) { // tx beendet, entsperren
+    if (status & UART_TX_DONE_INT_ST_M) { // tx beendet, sendUBX entsperren
         uart->int_ena.tx_done = 0; // interrupt deaktivieren
         xSemaphoreGiveFromISR(gps.txSemphr, &woken);
     } else if (status & UART_RXFIFO_TOUT_INT_ST_M || // rx-Frame erhalten
                status & UART_RXFIFO_FULL_INT_ST_M || // rx-FIFO bald voll
                status & UART_RXFIFO_OVF_INT_ST_M) {  // rx-FIFO Überlauf
-        xTaskNotifyFromISR(xGps, NULL, eIncrement, &woken);
-        // xSemaphoreGiveFromISR(gps.rxSemphr, &woken); // receiveUBX entsperren
+        uart->int_ena.rxfifo_tout = 0; // interrupt deaktivieren
+        xSemaphoreGiveFromISR(gps.rxSemphr, &woken); // rx beendet, receiveUBX entsperren
     } else if (status & UART_FRM_ERR_INT_ST_M) { // rx-Frame Error
         gps_uartRxFifoReset(); // FIFO zurücksetzten
     }
@@ -370,7 +375,7 @@ static bool gps_uartEnable(gpio_num_t txPin, gpio_num_t rxPin) {
     uart->conf1.rx_tout_thrhd = 10; // Interrupt nach Ende eines Frames
     uart->conf1.rx_tout_en = 1;
     uart->conf1.rxfifo_full_thrhd = 120; // Interrupt kurz vor rx-FIFO Überlauf damit dieser noch ohne Verlust geleert werden kann
-    uart->int_ena.val = UART_RXFIFO_TOUT_INT_ENA_M | UART_RXFIFO_OVF_INT_ENA_M | UART_FRM_ERR_INT_ENA_M | UART_RXFIFO_FULL_INT_ENA_M;
+    uart->int_ena.val = UART_RXFIFO_OVF_INT_ENA_M | UART_FRM_ERR_INT_ENA_M | UART_RXFIFO_FULL_INT_ENA_M;
 
     return false;
 }
