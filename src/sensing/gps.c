@@ -17,7 +17,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
-#include "ringbuf.h" // mit eigener Erweiterung
 #include <string.h>
 #include <math.h>
 #include "driver/uart.h" // uart_reg.h uart_struct.h
@@ -39,15 +38,12 @@
 #endif
 
 static struct {
-    gpio_num_t rxPin, txPin;
-    SemaphoreHandle_t txSemphr;
+    SemaphoreHandle_t rxSemphr, txSemphr;
 
     sensors_event_t position;
     sensors_event_t speed;
     event_t forward;
 } gps;
-
-static RingbufHandle_t xGps;
 
 extern uart_dev_t UART0;
 extern uart_dev_t UART1;
@@ -125,17 +121,6 @@ static bool gps_uartBaudrate(uint32_t baud_rate);
 static bool gps_uartEnable(gpio_num_t txPin, gpio_num_t rxPin);
 
 /*
- * Function: gps_uartAutoBaud
- * ----------------------------
- * Erkenne UART Baudrate.
- * 
- * ACHTUNG: Busy-Waits für eine unbestimmte Zeit bis 100 Pulse am rxPin erkannt wurden.
- *
- * returns uint32_t: erkannte Baudrate
- */
-// static uint32_t gps_uartAutoBaud();
-
-/*
  * Function: gps_uartRxFifoReset
  * ----------------------------
  * Leere UART FIFO.
@@ -146,18 +131,15 @@ static void gps_uartRxFifoReset();
 /** Implementierung **/
 
 bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
-    // Parameter speichern
-    gps.rxPin = rxPin;
-    gps.txPin = txPin;
     // Input Queue erstellen
-    xGps = xRingbufferCreate(256, RINGBUF_TYPE_BYTEBUF_REGISTER_READ);
     gps.position.type = SENSORS_POSITION;
     gps.speed.type = SENSORS_GROUNDSPEED;
     gps.forward.type = EVENT_INTERNAL;
-    gps.txSemphr = xSemaphoreCreateMutex();
+    gps.rxSemphr = xSemaphoreCreateBinary();
+    gps.txSemphr = xSemaphoreCreateBinary();
     xSemaphoreGive(gps.txSemphr);
     // eigener UART Treiber installieren
-    gps_uartEnable(gps.txPin, gps.rxPin);
+    gps_uartEnable(txPin, rxPin);
     // u-Blox Chip konfigurieren
     // UBX-CFG-PRT: NMEA deaktivieren, UART Baudrate auf 256000 setzen
     uint8_t msgPort[] = {0xB5, 0x62, 0x06, 0x00, 0x14, 0x00, 0x01,
@@ -282,38 +264,52 @@ static bool gps_sendUBX(uint8_t *buffer, uint8_t length, bool aknowledge, TickTy
 
 static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t length, TickType_t timeout) {
     TickType_t startTick = xTaskGetTickCount();
-    uint8_t *sync = NULL;
-    do { // suche nach Sync "u"
-        sync = xRingbufferReceiveUpTo(xGps, NULL, timeout, 1);
-        if (!sync) return true; // timeout
-        vRingbufferReturnItem(xGps, sync);
+    while (timeout) {
         if (timeout != portMAX_DELAY) {
             TickType_t dTick = xTaskGetTickCount() - startTick;
             if (dTick >= timeout) timeout = 0;
             else timeout -= dTick;
         }
-    } while (*sync != 0xb5);
-    size_t rxLength = 0;
-    uint8_t *rx = xRingbufferReceiveUpTo(xGps, &rxLength, timeout, length + 7);
-    bool ret = true;
-    if (rxLength >= 7) {
-        if (rxLength == length + 7
-        && rx[0] == 0x62 // Sync 2 "B"
-        && rx[1] == class && rx[2] == id // Class & Id
-        && rx[3] == (0x00ff & length) && rx[4] == (length >> 8)) { // Länge
-            uint8_t ckA = 0, ckB = 0; // Prüfsumme Ok?
-            for (uint16_t i = 1; i < length + 5; i++) {
-                ckA += rx[i];
-                ckB += ckA;
-            }
-            if (ckA == rx[length + 5] && ckB == rx[length + 6]) {
-                memcpy(payload, rx + 5, length);
-                ret = false;
+        UART[GPS_UART]->int_ena.rxfifo_tout = 1;
+        UART[GPS_UART]->int_ena.rxfifo_full = 1;
+        if (xSemaphoreTake(gps.rxSemphr, timeout) == pdFALSE) continue;
+        uint8_t c, position = 0;
+        while (UART[GPS_UART]->status.rxfifo_cnt) {
+            c = UART[GPS_UART]->fifo.rw_byte;
+            switch (position) {
+                case (0): // Sync 1
+                    if (c == 0xb5) position = 1;
+                    break;
+                case (1): // Sync 2
+                    if (c == 0x62) position = 2;
+                    else position = 0;
+                    break;
+                case (2): // Class
+                    if (c == class) position = 3;
+                    else position = 0;
+                    break;
+                case (3): // ID
+                    if (c == id) position = 4;
+                    else position = 0;
+                    break;
+                case (4): // Size LSB
+                    if (c == (length & 0x00ff)) position = 5;
+                    else position = 0;
+                    break;
+                case (5): // Size MSB
+                    if (c == (length >> 8)) position = 6;
+                    else position = 0;
+                    break;
+                default: // Payload
+                    if (position - 6 < length) {
+                        payload[position - 6] = c;
+                        ++position;
+                    } else return false; // komplettes Frame empfangen, ckA & ckB sind noch im Buffer, nächster Aufruf kümmert sich drum
+                    break;
             }
         }
     }
-    vRingbufferReturnItem(xGps, rx);
-    return ret;
+    return true; // timeout
 }
 
 static void gps_interrupt(void* arg) {
@@ -321,17 +317,17 @@ static void gps_interrupt(void* arg) {
     BaseType_t woken = pdFALSE;
     uint32_t status = uart->int_st.val;
     uart->int_clr.val = status; // aktive Interrupts zurücksetzen
-    if (status & UART_TX_DONE_INT_ST_M) { // tx beendet, entsperren
+    if (status & UART_TX_DONE_INT_ST_M) { // tx beendet, sendUBX entsperren
         uart->int_ena.tx_done = 0; // interrupt deaktivieren
         xSemaphoreGiveFromISR(gps.txSemphr, &woken);
     } else if (status & UART_RXFIFO_TOUT_INT_ST_M || // rx-Frame erhalten
-               status & UART_RXFIFO_FULL_INT_ST_M || // rx-FIFO bald voll
-               status & UART_RXFIFO_OVF_INT_ST_M) {  // rx-FIFO Überlauf
-        // FIFO in Ringbuffer einlesen
-        xRingbufferSendFromISR(xGps, (const void *)&uart->fifo.rw_byte, (size_t)uart->status.rxfifo_cnt, &woken);
-    } else if (status & UART_FRM_ERR_INT_ST_M) { // rx-Frame Error
-        // FIFO zurücksetzen
-        gps_uartRxFifoReset();
+               status & UART_RXFIFO_FULL_INT_ST_M) { // rx-FIFO bald voll
+        uart->int_ena.rxfifo_tout = 0; // interrupts deaktivieren
+        uart->int_ena.rxfifo_full = 0;
+        xSemaphoreGiveFromISR(gps.rxSemphr, &woken); // rx beendet, receiveUBX entsperren
+    } else if (status & UART_FRM_ERR_INT_ST_M || // rx-Frame Error
+               status & UART_RXFIFO_OVF_INT_ST_M) { // rx-FIFO Überlauf
+        gps_uartRxFifoReset(); // FIFO zurücksetzten
     }
     if (woken == pdTRUE) portYIELD_FROM_ISR();
 }
@@ -374,40 +370,10 @@ static bool gps_uartEnable(gpio_num_t txPin, gpio_num_t rxPin) {
     uart->conf1.rx_tout_thrhd = 10; // Interrupt nach Ende eines Frames
     uart->conf1.rx_tout_en = 1;
     uart->conf1.rxfifo_full_thrhd = 120; // Interrupt kurz vor rx-FIFO Überlauf damit dieser noch ohne Verlust geleert werden kann
-    uart->int_ena.val = UART_RXFIFO_TOUT_INT_ENA_M | UART_RXFIFO_OVF_INT_ENA_M | UART_FRM_ERR_INT_ENA_M | UART_RXFIFO_FULL_INT_ENA_M;
+    uart->int_ena.val = UART_FRM_ERR_INT_ENA_M | UART_RXFIFO_FULL_INT_ENA_M;
 
     return false;
 }
-
-// static uint32_t gps_uartAutoBaud() {
-//     uart_dev_t *uart = UART[GPS_UART];
-//     uint32_t low_period = 0, high_period = 0;
-//     uint32_t intena_reg = uart->int_ena.val;
-//     // Interrupts deaktivieren
-//     uart->int_ena.val = 0;
-//     uart->int_clr.val = UART_INTR_MASK;
-//     // Voreinstellungen
-//     uart->auto_baud.glitch_filt = 8;
-//     uart->auto_baud.en = 0;
-//     // aktivieren und 100 Impulse abwarten
-//     uart->auto_baud.en = 1;
-//     while (uart->rxd_cnt.edge_cnt < 100) {
-//         ets_delay_us(10);
-//     }
-//     low_period = uart->lowpulse.min_cnt;
-//     high_period = uart->highpulse.min_cnt;
-//     // Auto-Baud deaktivieren
-//     uart->auto_baud.en = 0;
-//     // ermittelte Baudrate einstellen
-//     uart->clk_div.div_int = (low_period > high_period) ? high_period : low_period;
-//     uart->clk_div.div_frag = 0;
-//     // FIFO zurücksetzen
-//     gps_uartRxFifoReset();
-//     // Interrupts wieder aktivieren
-//     uart->int_ena.val = intena_reg;
-//     // return Baudrate, baud = APB / divider
-//     return APB_CLK_FREQ / ((low_period > high_period) ? high_period : low_period);
-// }
 
 static void gps_uartRxFifoReset() {
     uart_dev_t *uart = UART[GPS_UART];
