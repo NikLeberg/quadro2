@@ -27,6 +27,25 @@
     alter BNO hatte 100 Hz Updaterate
     neuer hat 400 Hz! <3
 
+
+    3.0V - 4.2V per LiPo-Zelle
+    9.0V - 12.6V
+
+    Motorprofil:
+    Volt	12.6	10.8	9	
+    0.03	16	    10	    7	
+    0.1	    44	    27	    22	
+    0.2	    79	    56	    43	
+    0.3	    107	    80	    62
+    0.4	    145	    106	    62	
+    0.5	    175	    128	    62	
+    0.6	    211	    160		
+    0.7	    250	    190		
+    0.8	    	    190		
+    0.9	    	    197		
+    1				
+        >6A	?	<9V	
+
     // Pinout
     https://cdn.instructables.com/FOL/YWLI/JEOILQ5U/FOLYWLIJEOILQ5U.LARGE.jpg?auto=webp&frame=1&width=1024&fit=bounds
 
@@ -65,8 +84,7 @@
 // Bugs:
 // - Sensors X rechnet noch nicht mit Geschwindigkeit vom GPS
 // - libesphttpd besser portieren
-// - lib\ringbuf\ringbuf.c führt oft zu Watchdog Timeout im ISR, aber nur jeder "zweiter" Start
-// - eigenständiger restart nach: "V (4222) esp_adapter: thread sem get: sem=0x3ffd5808"
+// - gps ubx Prüfsumme wird nicht geprüft
 
 typedef enum {
     MAIN_PV_TICKS,
