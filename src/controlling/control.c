@@ -82,6 +82,8 @@ struct control_t {
 
     float throttleOverride;
 
+    float maxRollPitch;
+
     struct {
         vector_t euler;
         bool headingRate;
@@ -99,11 +101,14 @@ static struct control_t control;
 static command_t control_commands[CONTROL_COMMAND_MAX] = {
     COMMAND("disarm"),
     COMMAND("arm"),
-    COMMAND("resetStabilizePID")
+    COMMAND("resetStabilizePID"),
+    COMMAND("resetQueue")
 };
 static COMMAND_LIST("control", control_commands, CONTROL_COMMAND_MAX);
 
 static setting_t control_settings[CONTROL_SETTING_MAX] = {
+    SETTING("maxRollPitch",     &control.maxRollPitch,                      VALUE_TYPE_FLOAT),
+
     SETTING("xStabilizeKp",     &control.pids.stabilize[AXIS_ROLL].Kp,      VALUE_TYPE_FLOAT),
     SETTING("xStabilizeKi",     &control.pids.stabilize[AXIS_ROLL].Ki,      VALUE_TYPE_FLOAT),
     SETTING("xStabilizeKd",     &control.pids.stabilize[AXIS_ROLL].Kd,      VALUE_TYPE_FLOAT),
@@ -145,7 +150,10 @@ static pv_t control_pvs[CONTROL_PV_MAX] = {
     PV("backRight",     VALUE_TYPE_FLOAT),
     PV("roll",          VALUE_TYPE_FLOAT),
     PV("pitch",         VALUE_TYPE_FLOAT),
-    PV("heading",       VALUE_TYPE_FLOAT)
+    PV("heading",       VALUE_TYPE_FLOAT),
+    PV("xOut",          VALUE_TYPE_FLOAT),
+    PV("yOut",          VALUE_TYPE_FLOAT),
+    PV("zOut",          VALUE_TYPE_FLOAT)
 };
 static PV_LIST("control", control_pvs, CONTROL_PV_MAX);
 
@@ -183,7 +191,6 @@ static void control_pidSet(control_pid_t *pid, float Kp, float Ki, float Kd, flo
  * Function: control_pidCalculate
  * ----------------------------
  * Berechnet PID Regler.
- * ToDo: Integral Windup eliminieren.
  * 
  * control_pid_t *pid: PID-Container mit gespeicherten Zuständen und Gains
  * float setpoint: Sollwert
@@ -220,6 +227,15 @@ static void control_stabilize();
  * float throttles[4]: Throttle der einzelnen Motoren von 0.0 bis 1.0
  */
 static void control_motorsThrottle(float throttle[4]);
+
+/*
+ * Function: control_motorsBoost
+ * ----------------------------
+ * Erhöht geforderter Throttle sodass ein äquivalenter Schub wie bei voller Batterie resultiert.
+ *
+ * float *throttle: Throttle der geboosted werden soll
+ */
+static void control_motorsBoost(float *throttle);
 
 
 /** Implementierung **/
@@ -264,7 +280,7 @@ bool control_init(gpio_num_t motorFrontLeft, gpio_num_t motorFrontRight,
     ret |= ledc_channel_config(&ledcChannel);
     ESP_LOGD("control", "Motors %s", ret ? "error" : "ok");
     // installiere task
-    if (xTaskCreate(&control_task, "control", 2 * 1024, NULL, xControl_PRIORITY, NULL) != pdTRUE) return true;
+    if (xTaskCreate(&control_task, "control", 3 * 1024, NULL, xControl_PRIORITY, NULL) != pdTRUE) return true;
     return ret;
 }
 
@@ -274,48 +290,52 @@ bool control_init(gpio_num_t motorFrontLeft, gpio_num_t motorFrontRight,
 void control_task(void* arg) {
     // Variablen
     event_t event;
-    TickType_t timeout = 0;
     // PVs empfangen
     pv_t *pvRemoteConnection = intercom_pvSubscribe(xControl, xRemote, REMOTE_PV_CONNECTIONS); // UInt
     pv_t *pvRemoteTimeout = intercom_pvSubscribe(xControl, xRemote, REMOTE_PV_TIMEOUT); // Event
+    pv_t *pvRemoteState = intercom_pvSubscribe(xControl, xRemote, REMOTE_PV_STATE_ERROR); // Event
     pv_t *pvSensorsOrientation = intercom_pvSubscribe(xControl, xSensors, SENSORS_PV_ORIENTATION); // Event
+    pv_t *pvSensorsTimeout = intercom_pvSubscribe(xControl, xSensors, SENSORS_PV_TIMEOUT);
     // Loop
     while (true) {
-        if (xQueueReceive(xControl, &event, 1) == pdTRUE) {
-            switch (event.type) {
-                case (EVENT_COMMAND): // Befehl erhalten
-                    control_processCommand((control_command_t)event.data);
-                    break;
-                case (EVENT_PV): { // Istwert-Änderung
-                    pv_t *pv = event.data;
-                    if (pv == pvSensorsOrientation) control_stabilize();
-                    else if (pv == pvRemoteTimeout) {
-                        ESP_LOGD("control", "got timeout");
-                        control_processCommand(CONTROL_COMMAND_DISARM);
-                    } else if (pv == pvRemoteConnection) {
-                        ESP_LOGD("control", "got con");
-                        control_processCommand(CONTROL_COMMAND_DISARM);
-                    } else {
-                        ESP_LOGD("control", "got unknown %p", pv);
+        xQueueReceive(xControl, &event, portMAX_DELAY);
+        switch (event.type) {
+            case (EVENT_COMMAND): // Befehl erhalten
+                control_processCommand((control_command_t)event.data);
+                break;
+            case (EVENT_PV): { // Istwert-Änderung
+                pv_t *pv = event.data;
+                if (pv == pvSensorsOrientation) control_stabilize();
+                else if (!control.armed) break;
+                else if (pv == pvRemoteTimeout) {
+                    ESP_LOGD("control", "got timeout");
+                    control_processCommand(CONTROL_COMMAND_DISARM);
+                } else if (pv == pvRemoteConnection) {
+                    ESP_LOGD("control", "got con");
+                    control_processCommand(CONTROL_COMMAND_DISARM);
+                } else if (pv == pvRemoteState) {
+                    ESP_LOGD("control", "got state");
+                    control_processCommand(CONTROL_COMMAND_DISARM);
+                } else if (pv == pvSensorsTimeout) {
+                    if (pvGetUint(pv) == SENSORS_ORIENTATION) {
+                        ESP_LOGD("control", "got sens timeout");
                         control_processCommand(CONTROL_COMMAND_DISARM);
                     }
-                    break;
+                } else {
+                    ESP_LOGD("control", "got unknown %p", pv);
+                    control_processCommand(CONTROL_COMMAND_DISARM);
                 }
-                case (EVENT_INTERNAL):
-                default:
-                    // ungültig
-                    break;
+                break;
             }
-            // lösche wenn Platz gering wird
-            if (uxQueueSpacesAvailable(xControl) <= 1) {
-                xQueueReset(xControl);
-                ESP_LOGE("control", "queue reset!");
-            }
+            case (EVENT_INTERNAL):
+            default:
+                // ungültig
+                break;
         }
-        if (timeout) --timeout;
-        else {
-            timeout = 500 / portTICK_PERIOD_MS;
-            ;
+        // lösche wenn Platz gering wird
+        if (uxQueueSpacesAvailable(xControl) <= 1) {
+            xQueueReset(xControl);
+            ESP_LOGE("control", "queue reset!");
         }
     }
 }
@@ -324,10 +344,8 @@ static void control_processCommand(control_command_t command) {
     switch (command) {
         case (CONTROL_COMMAND_DISARM):
             control.armed = false;
-            ledc_stop(LEDC_HIGH_SPEED_MODE, 0, CONTROL_MOTOR_DUTY_MIN);
-            ledc_stop(LEDC_HIGH_SPEED_MODE, 1, CONTROL_MOTOR_DUTY_MIN);
-            ledc_stop(LEDC_HIGH_SPEED_MODE, 2, CONTROL_MOTOR_DUTY_MIN);
-            ledc_stop(LEDC_HIGH_SPEED_MODE, 3, CONTROL_MOTOR_DUTY_MIN);
+            float throttle[4];
+            control_motorsThrottle(throttle);
             pvPublishUint(xControl, CONTROL_PV_ARMED, 0);
             control_processCommand(CONTROL_COMMAND_RESET_STABILIZE_PID);
             break;
@@ -340,6 +358,8 @@ static void control_processCommand(control_command_t command) {
             control_pidReset(&control.pids.stabilize[AXIS_PITCH]);
             control_pidReset(&control.pids.stabilize[AXIS_HEADING]);
             break;
+        case (CONTROL_COMMAND_RESET_QUEUE):
+            xQueueReset(xControl);
         default:
             break;
     }
@@ -354,21 +374,22 @@ static void control_pidSet(control_pid_t *pid, float Kp, float Ki, float Kd, flo
 }
 
 static float control_pidCalculate(control_pid_t *pid, float setpoint, float feedback, TickType_t tick) {
-    float gain = 0.0f;
+    float gain;
     float error = setpoint - feedback;
     TickType_t deltaT = tick - pid->lastTick;
     pid->lastTick = tick;
-    if (pid->Kp) {
-        gain += pid->Kp * error;
-    }
-    if (pid->Ki) {
-        pid->integralError += error * deltaT;
-        gain += pid->Ki * pid->integralError;
-    }
-    if (pid->Kd) {
-        error *= deltaT;
-        gain += pid->Kd * (pid->prevError - error);
+    gain = pid->Kp * error; // P
+    if (pid->Kd) { // D
+        gain += pid->Kd * (error - pid->prevError) / deltaT;
         pid->prevError = error;
+    }
+    if (pid->Ki) { // I
+        error *= pid->Ki * deltaT;
+        pid->integralError += error;
+        gain += pid->integralError;
+        if (gain > pid->band || gain < -pid->band) { // anti-windup
+            pid->integralError -= error;
+        }
     }
     if (gain > pid->band) gain = pid->band;
     else if (gain < -pid->band) gain = -pid->band;
@@ -407,14 +428,24 @@ static void control_stabilize() {
     // aktuelle Orientierung (Istwert)
     vector_t euler;
     bno_toEuler(&euler, NULL);
-    pvPublishFloat(xControl, CONTROL_PV_ROLL, euler.x * (180.0f / M_PI));
-    pvPublishFloat(xControl, CONTROL_PV_PITCH, euler.y * (180.0f / M_PI));
-    pvPublishFloat(xControl, CONTROL_PV_HEADING, euler.z * (180.0f / M_PI));
+    pvPublishFloat(xControl, CONTROL_PV_ROLL, euler.x);
+    pvPublishFloat(xControl, CONTROL_PV_PITCH, euler.y);
+    pvPublishFloat(xControl, CONTROL_PV_HEADING, euler.z);
+    // Sicherheit
+    if ((euler.x > 0 && euler.x > control.maxRollPitch)
+     || (euler.x < 0 && euler.x < -control.maxRollPitch)
+     || (euler.y > 0 && euler.y > control.maxRollPitch)
+     || (euler.y < 0 && euler.y < -control.maxRollPitch)) {
+        ESP_LOGD("control", "max angle!");
+        control_processCommand(CONTROL_COMMAND_DISARM);
+    }
+    if (!control.armed) return;
     // rechne pids
     TickType_t tick = xTaskGetTickCount();
     vector_t gain; // - 1.0 bis + 1.0
     for (control_axes_t i = 0; i < 3; ++i) { // roll, pitch, heading
         gain.v[i] = control_pidCalculate(&control.pids.stabilize[i], control.setpoints.euler.v[i], euler.v[i], tick);
+        pvPublishFloat(xControl, CONTROL_PV_OUT_X + i, gain.v[i]);
     }
     // throttle rechnen
     float throttles[MOTOR_MAX];
@@ -428,7 +459,8 @@ static void control_stabilize() {
 static void control_motorsThrottle(float throttle[4]) {
     uint32_t duty;
     for (control_motors_t i = 0; i < MOTOR_MAX; ++i) {
-        if (control.throttleOverride) throttle[i] = control.throttleOverride;
+        if (control.throttleOverride) throttle[i] = control.throttleOverride; // DEBUG
+        control_motorsBoost(&throttle[i]);
         if (!control.armed) throttle[i] = 0.0f;
         if (throttle[i] > 1.0f) throttle[i] = 1.0f;
         else if (throttle[i] < 0.0f) throttle[i] = 0.0f;
@@ -437,4 +469,8 @@ static void control_motorsThrottle(float throttle[4]) {
         ledc_update_duty(LEDC_HIGH_SPEED_MODE, i);
         pvPublishFloat(xControl, CONTROL_PV_THROTTLE_FRONT_LEFT + i, throttle[i]);
     }
+}
+
+static void control_motorsBoost(float *throttle) {
+    ;
 }
