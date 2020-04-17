@@ -17,7 +17,6 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/event_groups.h"
-#include "freertos/ringbuf.h"
 #include "netif/wlanif.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -43,23 +42,24 @@
 
 /** Variablendeklaration **/
 
-typedef enum {
-    REMOTE_EVENT_WS_RECEIVE = 0,
-    REMOTE_EVENT_WS_SEND
-} remote_event_t;
-
 struct remote_t {
     HttpdFreertosInstance httpd;
     char httpdConn[sizeof(RtosConnType) * REMOTE_CONNECTION_COUNT];
-    RingbufHandle_t wsRxBuffer, wsTxBuffer;
     json_t jsonBuffer[8];
 
     uint8_t connected;
     Websock *ws;
+    TickType_t lastContact;
+    bool timeoutPending;
 
     esp_log_level_t logLevel;
     vprintf_like_t defaultLog;
 } remote;
+
+static command_t remote_commands[REMOTE_COMMAND_MAX] = {
+    COMMAND("resetQueue")
+};
+static COMMAND_LIST("remote", remote_commands, REMOTE_COMMAND_MAX);
 
 static setting_t remote_settings[REMOTE_SETTING_MAX] = {
     SETTING("logLevel", &remote.logLevel, VALUE_TYPE_UINT)
@@ -68,7 +68,8 @@ static SETTING_LIST("remote", remote_settings, REMOTE_SETTING_MAX);
 
 static pv_t remote_pvs[REMOTE_PV_MAX] = {
     PV("connections", VALUE_TYPE_UINT),
-    PV("timeout", VALUE_TYPE_NONE)
+    PV("timeout", VALUE_TYPE_NONE),
+    PV("stateError", VALUE_TYPE_NONE)
 };
 static PV_LIST("remote", remote_pvs, REMOTE_PV_MAX);
 
@@ -275,11 +276,9 @@ bool remote_init(char* ssid, char* pw) {
     // Intercom-Queue erstellen
     xRemote = xQueueCreate(32, sizeof(event_t));
     // an Intercom anbinden
+    commandRegister(xRemote, remote_commands);
     settingRegister(xRemote, remote_settings);
     pvRegister(xRemote, remote_pvs);
-    // Rx/Tx Ringbuffer erstellen
-    remote.wsRxBuffer = xRingbufferCreate(1 * 1024, RINGBUF_TYPE_NOSPLIT);
-    remote.wsTxBuffer = xRingbufferCreate(1 * 1024, RINGBUF_TYPE_NOSPLIT);
     // Task starten
     if (xTaskCreate(&remote_task, "remote", 3 * 1024, NULL, xRemote_PRIORITY, NULL) != pdTRUE) return true;
     // libesphttpd Bibliothek starten
@@ -295,36 +294,18 @@ bool remote_init(char* ssid, char* pw) {
 void remote_task(void* arg) {
     // Variablen
     event_t event;
-    bool timeoutPending = false;
-    TickType_t lastContact = xTaskGetTickCount();
     // Loop
     while (true) {
         if (xQueueReceive(xRemote, &event, 500 / portTICK_RATE_MS) == pdTRUE) {
             switch (event.type) {
-                case (EVENT_COMMAND): // keine Befehle
+                case (EVENT_COMMAND): {
+                    xQueueReset(xRemote);
                     break;
+                }
                 case (EVENT_PV): // weiterleiten
                     remote_pvForward((pv_t*)event.data);
                     break;
-                case (EVENT_INTERNAL): { // Daten in Rx / Tx Ringbuffer
-                    remote_event_t type = (remote_event_t)event.data;
-                    size_t length;
-                    char *message = NULL;
-                    if (type == REMOTE_EVENT_WS_RECEIVE) {
-                        message = xRingbufferReceive(remote.wsRxBuffer, &length, 0);
-                        if (message) {
-                            remote_messageProcess(message, length);
-                            lastContact = xTaskGetTickCount();
-                            timeoutPending = false;
-                            vRingbufferReturnItem(remote.wsRxBuffer, message);
-                        }
-                    } else if (type == REMOTE_EVENT_WS_SEND) {
-                        message = xRingbufferReceive(remote.wsTxBuffer, &length, 0);
-                        if (message) {
-                            remote_messageSend(message, length);
-                            vRingbufferReturnItem(remote.wsTxBuffer, message);
-                        }
-                    }
+                case (EVENT_INTERNAL): {
                     break;
                 }
                 default:
@@ -332,13 +313,13 @@ void remote_task(void* arg) {
             }
         }
         // Timeout erkennen
-        if (remote.connected && (xTaskGetTickCount() - lastContact > (REMOTE_TIMEOUT_MS / portTICK_PERIOD_MS))) {
-            if (timeoutPending) { // Timeout fällig -> echter Timeout! -> Notstopp
-                timeoutPending = false;
+        if (remote.connected && (xTaskGetTickCount() - remote.lastContact > (REMOTE_TIMEOUT_MS / portTICK_PERIOD_MS))) {
+            if (remote.timeoutPending) { // Timeout fällig -> echter Timeout! -> Notstopp
+                remote.timeoutPending = false;
                 pvPublish(xRemote, REMOTE_PV_TIMEOUT);
             } else {
-                timeoutPending = true;
-                lastContact = xTaskGetTickCount();
+                remote.timeoutPending = true;
+                remote.lastContact = xTaskGetTickCount();
                 char message[] = "[ ]";
                 message[1] = REMOTE_MESSAGE_STATE + 48; // zu ASCII
                 remote_messageSend(message, sizeof(message) - 1);
@@ -361,6 +342,7 @@ static esp_err_t remote_connectionEventHandler(void *ctx, system_event_t *event)
         case SYSTEM_EVENT_STA_DISCONNECTED:
             // Verbindung wiederherstellen, wenn nicht absichtlich
             switch(event->event_info.disconnected.reason) {
+                case (WIFI_REASON_AUTH_EXPIRE):
                 case (WIFI_REASON_AUTH_FAIL):
                     #if (REMOTE_RESET_AFTER_STOP == 0)
                         break;
@@ -433,7 +415,8 @@ static void remote_messageProcess(char *message, size_t length) {
             const json_t *jData = json_getSibling(jType);
             remote_message_type_t type = json_getInteger(jType);
             switch (type) {
-                case (REMOTE_MESSAGE_STATE):
+                case (REMOTE_MESSAGE_STATE): // [1,1] - ok, [1,0] - error
+                    if (message[3] != '1') pvPublish(xRemote, REMOTE_PV_STATE_ERROR);
                     break;
                 case (REMOTE_MESSAGE_LOG):
                     break;
@@ -589,9 +572,10 @@ static void remote_messageSend(char *message, size_t length) {
 }
 
 static void remote_wsReceive(Websock *ws, char *data, int len, int flags) {
-    if (xRingbufferSend(remote.wsRxBuffer, data, len, 0) == pdTRUE) {
-        event_t event = {EVENT_INTERNAL, REMOTE_EVENT_WS_RECEIVE};
-        xQueueSendToBack(xRemote, &event, 0);
+    if (ws == remote.ws) {
+        remote.lastContact = xTaskGetTickCount();
+        remote.timeoutPending = false;
+        remote_messageProcess(data, len);
     }
 }
 
@@ -612,6 +596,8 @@ static void remote_wsDisconnect(Websock *ws) {
     // inaktiv setzen
     if (remote.ws == ws) remote.ws = NULL;
     --remote.connected;
+    // pv-Registrierungen in Intercom löschen
+    intercom_pvUnsubscribeAll(xRemote);
     // Event publizieren
     pvPublishUint(xRemote, REMOTE_PV_CONNECTIONS, remote.connected);
 }
@@ -680,10 +666,7 @@ int remote_printLog(const char * format, va_list arguments) {
             for (size_t i = 0; i <= length; ++i) {
                 if (buffer[i] == '\n') buffer[i] = ' ';
             }
-            if (xRingbufferSend(remote.wsTxBuffer, buffer, length, 0) == pdTRUE) {
-                event_t event = {EVENT_INTERNAL, (void*)REMOTE_EVENT_WS_SEND};
-                xQueueSendToBack(xRemote, &event, 0);
-            }
+            remote_messageSend(buffer, length);
         }
     }
     return remote.defaultLog(format, arguments);

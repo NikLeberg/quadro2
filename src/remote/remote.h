@@ -25,11 +25,16 @@
 
 #define REMOTE_CONNECTION_COUNT (10U)   // Anzahl gleichzeitiger Verbindungen
 #define REMOTE_START_AFTER_STOP 1       // Nach WLAN Error automatisch Verbindung neustarten
-#define REMOTE_RESET_AFTER_STOP 0       // Nach WLAN Error Neustarten
+#define REMOTE_RESET_AFTER_STOP 1       // Nach WLAN Error Neustarten
 #define REMOTE_TIMEOUT_MS 500           // Verbindungstimeout
 
 
 /** Befehle **/
+
+typedef enum {
+    REMOTE_COMMAND_RESET_QUEUE = 0,
+    REMOTE_COMMAND_MAX
+} remote_command_t;
 
 
 /** Einstellungen **/
@@ -37,7 +42,7 @@
 typedef enum {
     REMOTE_SETTING_LOGLEVEL = 0,
     REMOTE_SETTING_MAX
-} rempte_setting_t;
+} remote_setting_t;
 
 
 /** Parameter **/
@@ -48,6 +53,7 @@ typedef enum {
 typedef enum {
     REMOTE_PV_CONNECTIONS = 0,
     REMOTE_PV_TIMEOUT,
+    REMOTE_PV_STATE_ERROR,
     REMOTE_PV_MAX
 } remote_pv_t;
 
