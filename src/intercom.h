@@ -264,6 +264,7 @@ void intercom_pvRegister(QueueHandle_t publisher, pv_list_t *list);
 #define pvRegister(queue, pvs)      intercom_pvRegister(queue, &(pvs##_list))
 pv_t *intercom_pvSubscribe(QueueHandle_t subscriber, QueueHandle_t publisher, uint32_t pvNum);
 pv_t *intercom_pvSubscribe2(QueueHandle_t subscriber, uint32_t publisherNum, uint32_t pvNum);
+void intercom_pvUnsubscribeAll(QueueHandle_t subscriber);
 
 void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum, value_t value);
 #define pvPublish(publisher, pvNum)             intercom_pvPublish(publisher, pvNum, (value_t)0)

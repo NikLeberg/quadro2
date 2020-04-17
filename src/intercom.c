@@ -507,6 +507,26 @@ pv_t *intercom_pvSubscribe2(QueueHandle_t subscriber, uint32_t publisherNum, uin
     else return NULL;
 }
 
+void intercom_pvUnsubscribeAll(QueueHandle_t subscriber) {
+    // über Publisher iterieren
+    pv_list_t *node = intercom.pvHead;
+    while (true) {
+        if (!node) return; // am Ende angelangt
+        // über PVs iterieren
+        for (uint8_t i = 0; i < node->length; ++i) {
+            pv_t *pv = &node->pvs[i];
+            // über subscriber iterieren
+            for (uint8_t j = 0; j < INTERCOM_PV_MAX_SUBSCRIBERS; ++j) {
+                if (pv->subscribers[j] == subscriber) { // registriert, löschen
+                    pv->subscribers[j] = NULL;
+                    continue;
+                }
+            }
+        }
+        node = node->next;
+    }
+}
+
 void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum, value_t value) {
     pv_list_t *node = intercom_pvSearchPublisher(publisher);
     if (!node || pvNum >= node->length) return; // Pv nicht vorhanden
