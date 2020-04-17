@@ -20,12 +20,22 @@ window.addEventListener("load", function(event) {
             else s.display = "none";
         });
     }
+    document.addEventListener("visibilitychange", function() {
+        ws.send("[1,0]");
+    });
 });
 
 function init() {
     ws = new WebSocket("ws:/" + window.location.hostname + "/ws");
     ws.onmessage = processMessage;
     ws.onclose = reconnect;
+    ws.onopen = function() {
+        ws.send('[7]');
+        ws.send('[8]');
+        ws.send('[9]');
+        ws.send('[10]');
+        setTimeout(link, 2000);
+    };
     // ws.timeout = setTimeout(function() {
     //     ws.close(); // triggert onclose
     // }, 5000);
@@ -144,6 +154,7 @@ function settingResponse(setting) {
     let e = $("input", n)[setting[1]];
     e.setAttribute("qType", setting[2]);
     e.value = setting[3];
+    e.dispatchEvent(new Event("change"));
 }
 
 function gotParameterList(parameters) {
@@ -159,6 +170,7 @@ function parameterResponse(parameter) {
     let e = $("input", n)[parameter[1]];
     e.setAttribute("qType", parameter[2]);
     e.value = parameter[3];
+    e.dispatchEvent(new Event("change"));
 }
 
 function valueRequest(i) {
@@ -222,4 +234,91 @@ function gotPv(pv) {
 
 function clearLog() {
     empty($("#log")[0]);
+}
+
+function link() {
+    for (let e of $("input[q-link]")) {
+        let s = e.getAttribute("q-link").split("/");
+        let i = $("#" + s[0] + "s > fieldset[name=" + s[1] + "] > input[name=" + s[2] + "]")[0];
+        if (!i) continue;
+        if (e.type == "text") e.type = i.type;
+        e.value = i.value;
+        switch(s[0]) {
+            case ("command"):
+                e.onclick = () => {
+                    i.dispatchEvent(new Event("click"));
+                };
+                break;
+            case ("setting"):
+            case ("parameter"):
+                e.onblur = () => {
+                    i.value = e.value;
+                    i.dispatchEvent(new Event("blur"));
+                };
+                i.addEventListener("change", () => {
+                    e.value = i.value;
+                });
+                break;
+            case ("pv"):
+                e.type = "number";
+                e.disabled = true;
+                if (i.value == "Registrieren") i.dispatchEvent(new Event("click"));
+                i.addEventListener("change", () => {
+                    e.value = i.value;
+                });
+                break;
+        }
+    }
+    for (let div of $("div[q-log]")) {
+        empty(div);
+        let attrib = div.getAttribute("q-log");
+        let csv = [];
+        let a = document.createElement("a");
+        a.download = attrib.replace(/[,\/]/g, "-") + ".csv";
+        a.style = "display: none";
+        div.appendChild(a);
+        let toggle = document.createElement("input");
+        toggle.type = "button";
+        toggle.value = "Ein";
+        div.appendChild(toggle);
+        toggle.onclick = () => {
+            if (div.hasAttribute("q-enabled")) {
+                div.removeAttribute("q-enabled");
+                let url = window.URL.createObjectURL(new Blob(csv, {type: "text/csv"}));
+                a.href = url;
+                a.click();
+                window.URL.revokeObjectURL(url);
+                toggle.value = "Ein";
+                stat.value = 0;
+                csv = [csv[0]];
+            } else {
+                div.setAttribute("q-enabled", "true");
+                toggle.value = "Aus / Download";
+            }
+        }
+        let stat = document.createElement("input");
+        stat.type = "number";
+        stat.value = 0;
+        stat.disabled = true;
+        div.appendChild(stat);
+        csv.push("Time;" + attrib.replace(/,/g, ";") + "\n");
+        let values = attrib.split(",");
+        for (let [index, value] of values.entries()) {
+            value = value.split("/");
+            let input = $("#" + value[0] + "s > fieldset[name=" + value[1] + "] > input[name=" + value[2] + "]")[0];
+            if (!input) continue;
+            input.addEventListener("change", () => {
+                if (!div.hasAttribute("q-enabled")) return;
+                let row = [];
+                row.push(Date.now());
+                for (let i = 0; i < index; ++i) {
+                    row.push("");
+                }
+                row.push(input.value);
+                csv.push(row.join(";") + "\n");
+                stat.value = parseInt(stat.value) + 1;
+            });
+            if (input.value == "Registrieren") input.dispatchEvent(new Event("click"));
+        }
+    }
 }
