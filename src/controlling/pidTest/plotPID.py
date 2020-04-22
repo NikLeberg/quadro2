@@ -9,7 +9,7 @@ def main():
     ist = [0.0]
     soll = [0.0]
     out = [0.0]
-
+    throttle = [0.0]
     with open(str(sys.argv[1])) as csvfile:
         readCSV = csv.reader(csvfile, delimiter=';')
         rows = iter(readCSV)
@@ -18,6 +18,7 @@ def main():
         headIst = row[1]
         headSoll = row[2]
         headOut = row[3]
+        headThrottle = row[4]
         row = next(rows)
         lastTimestamp = float(row[0])
         # über Zeilen iterieren
@@ -32,14 +33,22 @@ def main():
                     ist.append(float(row[1]))
                     soll.append(soll[-1])
                     out.append(out[-1])
+                    throttle.append(throttle[-1])
                 if (len(row) > 2 and row[2] != ''):
                     ist.append(ist[-1])
                     soll.append(float(row[2]))
                     out.append(out[-1])
+                    throttle.append(throttle[-1])
                 if (len(row) > 3 and row[3] != ''):
                     ist.append(ist[-1])
                     soll.append(soll[-1])
                     out.append(float(row[3]))
+                    throttle.append(throttle[-1])
+                if (len(row) > 4 and row[4] != ''):
+                    ist.append(ist[-1])
+                    soll.append(soll[-1])
+                    out.append(out[-1])
+                    throttle.append(float(row[4]))
                 # speichere für Plot
                 time.append(time[-1] + dT)
 
@@ -52,6 +61,7 @@ def main():
         plt.plot(time, ist, label=headIst)
         plt.plot(time, soll, label=headSoll)
         plt.plot(time, out, label=headOut)
+        plt.plot(time, throttle, label=headThrottle)
         plt.legend()
         plt.show()
 
