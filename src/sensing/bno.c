@@ -5,6 +5,12 @@
  * Date:   2020-02-09
  * ----------------------------
  * Implementiert den BNO080 Sensor mittels SensorHub-2 Bibliothek von Hillcrest
+ * 
+ * Pinbelegung:
+ * - SA0, PS0 & PS1 an GND
+ * - BOOT & CL0 an 3.3V
+ * - EDA an SDI
+ * - ECL an SCK
  */
 
 
@@ -29,6 +35,7 @@
 #include "resources.h"
 #include "i2c.h"
 #include "sensor_types.h"
+#include "sensors.h"
 #include "bno.h"
 
 
@@ -50,7 +57,6 @@ static struct {
     sh2_rxCallback_t *onRx;
     uint8_t rxBuffer[SH2_HAL_MAX_TRANSFER];
     SemaphoreHandle_t sh2Lock;
-    bool recoveryPending;
 
     sensors_event_t acceleration;
     sensors_event_t orientation;
@@ -115,9 +121,6 @@ static void bno_initDone(void *cookie, sh2_AsyncEvent_t *event);
  */
 static bool bno_sensorEnable(sh2_SensorId_t sensorId, uint32_t interval_us);
 
-// ToDo
-static void bno_recover(void *arg);
-
 
 /** Implementierung **/
 
@@ -157,7 +160,7 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin) {
     if (sh2_initialize(&bno_initDone, sInitDone)) return true;
     if (xSemaphoreTake(sInitDone, BNO_STARTUP_WAIT_MS / portTICK_PERIOD_MS) == pdFALSE) return true; // warte auf Initialisierung
     vSemaphoreDelete(sInitDone);
-    // Standartsensoren aktivieren (Intervall so schnell wie möglich)
+    // Standartsensoren aktivieren
     if (sh2_setSensorCallback(&bno_sensorEvent, NULL)) return true;
     if (bno_sensorEnable(SH2_ROTATION_VECTOR, BNO_DATA_RATE_QUAT_US)) return true;
     if (bno_sensorEnable(SH2_LINEAR_ACCELERATION, BNO_DATA_RATE_ACCEL_US)) return true;
@@ -184,13 +187,7 @@ void bno_task(void* arg) {
             // Ermittle Datenlänge des SHTP-Packets
             uint16_t cargoLength;
             cargoLength = ((bno.rxBuffer[1] << 8) + (bno.rxBuffer[0])) & 0x7fff;
-            if (!cargoLength) {
-                if (timeoutCount > 3) {
-                    timeoutCount = 0;
-                    bno_recover(NULL); // längst fällig
-                }
-                else continue;
-            }
+            if (!cargoLength) continue;
             // verbleibende Daten berechnen
             if (cargoLength > readLength) {
                 rxRemaining = (cargoLength - readLength) + SHTP_HEADER_LEN;
@@ -199,6 +196,7 @@ void bno_task(void* arg) {
             bno.onRx(NULL, bno.rxBuffer, readLength, event.timestamp);
             timeoutCount = 0;
         } else { // vermutlich ein Interrupt verpasst, prüfe
+            pvPublishUint(xSensors, SENSORS_PV_TIMEOUT, SENSORS_ORIENTATION); // DEBUG
             if (gpio_get_level(bno.interruptPin) == 0 || ++timeoutCount > 3) {
                 event.timestamp = esp_timer_get_time();
                 xQueueSendToBack(xBno, &event, 0);
@@ -319,7 +317,7 @@ static void bno_sensorEvent(void * cookie, sh2_SensorEvent_t *event) {
             bno.forward.data = &bno.altitude;
             break;
         default:
-            break;
+            return;
     }
     xQueueSendToBack(xSensors, &bno.forward, 0);
     return;
@@ -347,37 +345,36 @@ static void bno_initDone(void *cookie, sh2_AsyncEvent_t *event) {
     }
 }
 
-static void bno_recover(void *arg) {
-    // starte sich selbst als Task
-    // if (!(uint32_t)arg) {
-    //     if (bno.recoveryPending) return;
-    //     ESP_LOGE("bno", "start of recovery task!");
-    //     bno.recoveryPending = true;
-    //     xTaskCreate(&bno_recover, "bno_recover", 2 * 1024, (void*)1, xSensors_PRIORITY + 1, NULL);
-    // } else {
-    //     BaseType_t ret = pdFALSE;
-    //     sh2_reinitialize();
-    //     ret = xSemaphoreTake(bno.sh2Lock, 1000 / portTICK_PERIOD_MS);
-    //     xSemaphoreGive(bno.sh2Lock);
-    //     if (ret == pdFALSE) {
-    //         ESP_LOGE("bno", "timeout, hard reset");
-    //         xSemaphoreGive(bno.sh2Lock);
-    //         SemaphoreHandle_t sInitDone = xSemaphoreCreateBinary();
-    //         sh2_initialize(&bno_initDone, sInitDone);
-    //         ret = xSemaphoreTake(sInitDone, 1000 / portTICK_PERIOD_MS);
-    //         vSemaphoreDelete(sInitDone);
-    //         if (ret == pdFALSE) {
-    //             ESP_LOGE("bno", "recovery failed!");
-    //             vTaskDelete(NULL);
-    //         }
-    //     }
-    //     bno_sensorEnable(SH2_ROTATION_VECTOR, BNO_DATA_RATE_IMU_US);
-    //     bno_sensorEnable(SH2_LINEAR_ACCELERATION, BNO_DATA_RATE_IMU_US);
-    //     bno_sensorEnable(SH2_PRESSURE, BNO_DATA_RATE_PRESSURE_US);
-    //     ESP_LOGE("bno", "recovery done!");
-    //     bno.recoveryPending = false;
-    //     vTaskDelete(NULL);
-    // }
+void bno_recover(uint8_t level) {
+    int32_t result;
+    switch (level) {
+        case (0): { // Level 0 - Report neu aktivieren
+            result = bno_sensorEnable(SH2_ROTATION_VECTOR, BNO_DATA_RATE_QUAT_US);
+            ESP_LOGD("bno", "enable quat: %i", result);
+            result = bno_sensorEnable(SH2_LINEAR_ACCELERATION, BNO_DATA_RATE_ACCEL_US);
+            ESP_LOGD("bno", "enable accel: %i", result);
+            result = bno_sensorEnable(SH2_PRESSURE, BNO_DATA_RATE_PRESSURE_US);
+            ESP_LOGD("bno", "enable press: %i", result);
+            break;
+        }
+        case (1): { // Level 1 - sh2 Reinitialisieren
+            result = sh2_reinitialize();
+            ESP_LOGD("bno", "reinit: %i", result);
+            break;
+        }
+        case (2): { // Level 2 - Hard Reset
+            bno.onRx = NULL;
+            SemaphoreHandle_t sInitDone = xSemaphoreCreateBinary();
+            result = sh2_initialize(&bno_initDone, sInitDone);
+            ESP_LOGD("bno", "init: %i", result);
+            result = xSemaphoreTake(sInitDone, BNO_STARTUP_WAIT_MS / portTICK_PERIOD_MS);
+            ESP_LOGD("bno", "init wait: %i", result);
+            vSemaphoreDelete(sInitDone);
+            break;
+        }
+        default:
+            break;
+    }
 }
 
 /** sh2-hal Implementierung (sh2_hal.h) **/
@@ -388,10 +385,10 @@ int sh2_hal_reset(bool dfuMode, sh2_rxCallback_t *onRx, void *cookie) {
     bno.onRx = onRx;
     // Sensor-Reset
     gpio_set_level(bno.resetPin, 0);
-    vTaskDelay(100 / portTICK_RATE_MS);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
     gpio_set_level(bno.resetPin, 1);
-    vTaskDelay(200 / portTICK_RATE_MS);
-    return false;
+    vTaskDelay(200 / portTICK_PERIOD_MS);
+    return SH2_OK;
 }
 
 int sh2_hal_tx(uint8_t *pData, uint32_t len) {
@@ -400,15 +397,17 @@ int sh2_hal_tx(uint8_t *pData, uint32_t len) {
 
 int sh2_hal_rx(uint8_t *pData, uint32_t len) {
     configASSERT(false);
-    return true; // DFU Modus nicht implementiert
+    return SH2_ERR; // DFU Modus nicht implementiert
 }
 
 int sh2_hal_block(void) {
-    xSemaphoreTake(bno.sh2Lock, portMAX_DELAY);
-    return false; // rx-tx blockiert automatisch
+    if (xSemaphoreTake(bno.sh2Lock, BNO_STARTUP_WAIT_MS / portTICK_PERIOD_MS) == pdFALSE) {
+        pvPublishUint(xSensors, SENSORS_PV_TIMEOUT, SENSORS_ORIENTATION); // DEBUG
+    }
+    return SH2_OK;
 }
 
 int sh2_hal_unblock(void) {
     xSemaphoreGive(bno.sh2Lock);
-    return false; // rx-tx blockiert automatisch
+    return SH2_OK;
 }

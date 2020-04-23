@@ -70,3 +70,12 @@ void bno_toLocalFrame(vector_t *vector, orientation_t *quaternion);
  * orientation_t *quaternion: Quaternion für Umrechnung, bei NULL wird interner Quaternion benutzt
  */
 void bno_toEuler(vector_t *euler, orientation_t *quaternion);
+
+/*
+ * Function: bno_recover
+ * ----------------------------
+ * Versuche Kommunikation zu bno wiederherzustellen.
+ *
+ * uint8_t level: 0 - Reports erneut aktivieren, 1 - sh2 reinitialisieren, 2 - hard reset
+ */
+void bno_recover(uint8_t level);

@@ -105,7 +105,10 @@ static command_t sensors_commands[SENSORS_COMMAND_MAX] = {
     COMMAND("setHome"),
     COMMAND("setAltimeterToGPS"),
     COMMAND("resetFusion"),
-    COMMAND("resetQueue")
+    COMMAND("resetQueue"),
+    COMMAND("recoverBNO0"),
+    COMMAND("recoverBNO1"),
+    COMMAND("recoverBNO2")
 };
 static COMMAND_LIST("sensors", sensors_commands, SENSORS_COMMAND_MAX);
 
@@ -191,15 +194,15 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     ESP_LOGD("sensors", "I2C %s", ret ? "error" : "ok");
     // BNO initialisieren + Reports für Beschleunigung, Orientierung und Druck aktivieren
     ESP_LOGD("sensors", "BNO init");
-    ret |= bno_init(bnoAddr, bnoInterrupt, bnoReset);
+    ret = bno_init(bnoAddr, bnoInterrupt, bnoReset);
     ESP_LOGD("sensors", "BNO %s", ret ? "error" : "ok");
     // Ultraschall initialisieren
     ESP_LOGD("sensors", "ULT init");
-    ret |= ult_init(ultTrigger, ultEcho);
+    ret = ult_init(ultTrigger, ultEcho);
     ESP_LOGD("sensors", "ULT %s", ret ? "error" : "ok");
     // GPS initialisieren
     ESP_LOGD("sensors", "GPS init");
-    ret |= gps_init(gpsRxPin, gpsTxPin);
+    ret = gps_init(gpsRxPin, gpsTxPin);
     ESP_LOGD("sensors", "GPS %s", ret ? "error" : "ok");
     // Kalman Filter Z initialisieren
     EEKF_CALLOC_MATRIX(sensors.Z.x, 2, 1); // 2 States: Position, Geschwindigkeit
@@ -282,6 +285,15 @@ static void sensors_processCommand(sensors_command_t command) {
         case (SENSORS_COMMAND_RESET_QUEUE):
             xQueueReset(xSensors);
             break;
+        case (SENSORS_COMMAND_RECOVER_BNO0):
+            bno_recover(0);
+            break;
+        case (SENSORS_COMMAND_RECOVER_BNO1):
+            bno_recover(1);
+            break;
+        case (SENSORS_COMMAND_RECOVER_BNO2):
+            bno_recover(2);
+            break;
         default:
             break;
     }
@@ -330,13 +342,12 @@ static void sensors_processData(sensors_event_t *event) {
 }
 
 static void sensors_detectTimeout(int64_t timestamp) {
-    for (uint32_t i = 0; i < SENSORS_MAX; ++i) {
+    for (sensors_event_type_t i = 0; i < SENSORS_MAX; ++i) {
         if (sensors.states[i] && ((timestamp - sensors.states[i]->timestamp) > sensors.timeout)) {
             pvPublishUint(xSensors, SENSORS_PV_TIMEOUT, i);
             sensors.states[i]->timestamp = timestamp;
         }
     }
-    
 }
 
 
