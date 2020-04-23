@@ -24,6 +24,7 @@
 #include "esp_log.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
+#define CONFIG_ESPHTTPD_TCP_NODELAY 1
 #include "esp.h" //libesphttpd
 #include "httpd.h"
 #include "httpd-freertos.h"
@@ -253,6 +254,8 @@ extern char _binary_src_remote_www_favicon_svg_gz_start;
 extern char _binary_src_remote_www_favicon_svg_gz_end;
 extern char _binary_src_remote_www_script_min_js_start;
 extern char _binary_src_remote_www_script_min_js_end;
+extern char _binary_src_remote_www_style_min_css_start;
+extern char _binary_src_remote_www_style_min_css_end;
 
 HttpdBuiltInUrl builtInUrls[] = {
     // WebSocket
@@ -263,6 +266,7 @@ HttpdBuiltInUrl builtInUrls[] = {
     ROUTE_CGI_ARG2("/manifest.json", remote_sendEmbedded, &_binary_src_remote_www_manifest_json_start, &_binary_src_remote_www_manifest_json_end),
     ROUTE_CGI_ARG2("/favicon.svg", remote_sendEmbedded, &_binary_src_remote_www_favicon_svg_gz_start, &_binary_src_remote_www_favicon_svg_gz_end),
     ROUTE_CGI_ARG2("/script.js", remote_sendEmbedded, &_binary_src_remote_www_script_min_js_start, &_binary_src_remote_www_script_min_js_end),
+    ROUTE_CGI_ARG2("/style.css", remote_sendEmbedded, &_binary_src_remote_www_style_min_css_start, &_binary_src_remote_www_style_min_css_end),
     ROUTE_END()
 };
 

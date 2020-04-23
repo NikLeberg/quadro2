@@ -6,11 +6,17 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <link rel="icon" href="favicon.svg" />
     <link rel="manifest" href="manifest.json" />
-    <script type ="text/javascript" src = "script.js"></script>
+    <link rel="stylesheet" type="text/css" href="style.css" />
+    <script type="text/javascript" src="script.js"></script>
 </head>
 <body>
 
     <h1>quadro2</h1>
+    <div id="quadro2">
+        <input q-link="pv/control/roll">
+        <input q-link="pv/control/pitch">
+        <input q-link="pv/control/heading">
+    </div>
     <p id=ws style="font-family: monospace;">-</p>
     <div id="intercom">
         <p>Befehle</p>
@@ -38,9 +44,9 @@
         z: Kp<input q-link="setting/control/zStabilizeKp">Ki<input q-link="setting/control/zStabilizeKi">Kd<input q-link="setting/control/zStabilizeKd">
         Band<input q-link="setting/control/zStabilizeBand">Out<input q-link="pv/control/zOut">
         <p>x - Roll</p>
-        <div q-log="pv/control/roll,parameter/control/roll,pv/control/xOut"></div>
+        <div q-log="pv/control/roll;parameter/control/roll;pv/control/xOut;parameter/control/throttle"></div>
         <p>y - Pitch</p>
-        <div q-log="pv/control/pitch,parameter/control/pitch,pv/control/yOut"></div>
+        <div q-log="pv/control/pitch;parameter/control/pitch;pv/control/yOut;parameter/control/throttle"></div>
     </div>
     <div id="logDiv">
         <p>Log</p>

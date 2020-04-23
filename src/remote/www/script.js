@@ -14,26 +14,27 @@ let ws;
 window.addEventListener("load", function(event) {
     init();
     for (let p of $("#intercom > p")) {
-        p.addEventListener("click", function(event) {
+        p.onclick = function(event) {
             let s = event.target.nextSibling.style;
             if (s.display == "none") s.display = "inherit";
             else s.display = "none";
-        });
+        };
     }
     document.addEventListener("visibilitychange", function() {
         ws.send("[1,0]");
     });
+    animateQuadro();
 });
 
 function init() {
-    ws = new WebSocket("ws:/" + window.location.hostname + "/ws");
+    ws = new WebSocket(`ws:/${window.location.hostname}/ws`);
     ws.onmessage = processMessage;
     ws.onclose = reconnect;
     ws.onopen = function() {
-        ws.send('[7]');
-        ws.send('[8]');
-        ws.send('[9]');
-        ws.send('[10]');
+        ws.send("[7]");
+        ws.send("[8]");
+        ws.send("[9]");
+        ws.send("[10]");
         setTimeout(link, 2000);
     };
     // ws.timeout = setTimeout(function() {
@@ -118,10 +119,10 @@ function genericCreateForm(json, form, type, value, label) {
     for (let node of json) {
         let set = document.createElement("fieldset");
         set.name = node[0];
-        set.innerHTML = "<legend>" + node[0] + "</legend>";
+        set.innerHTML = `<legend>${node[0]}</legend>`;
         for (let element of node[1]) {
-            set.innerHTML += "<input type='" + type + "' name='" + element + "' value='" + (value ? value : element) + "'> ";
-            if (label) set.innerHTML += "<label for='" + element + "'>" + element + "</label><br>";
+            set.innerHTML += `<input type="${type}" name="${element}" value="${(value ? value : element)}">`;
+            if (label) set.innerHTML += `<label for="${element}">${element}</label><br>`;
         }
         form.appendChild(set);
     }
@@ -138,7 +139,7 @@ function commandClick(event) {
     let p = t.parentNode;
     let n = $("fieldset", t.form).indexOf(p);
     let e = $("input", p).indexOf(t);
-    ws.send("[3,[" + n + "," + e + "]]");
+    ws.send(`[3,[${n},${e}]]`);
 }
 
 function gotSettingList(settings) {
@@ -177,7 +178,7 @@ function valueRequest(i) {
     let p = i.parentNode;
     let n = $("fieldset", i.form).indexOf(p);
     let e = $("input", p).indexOf(i);
-    ws.send("[" + (i.form.id == "settings" ? 4 : 5) + ",[" + n + "," + e + "]]");
+    ws.send(`[${i.form.id == "settings" ? 4 : 5},[${n},${e}]]`);
 }
 
 function valueBlur(event) {
@@ -187,7 +188,7 @@ function valueBlur(event) {
     let e = $("input", p).indexOf(t);
     let v = t.value;
     if (!t.attributes.qType) return;
-    switch (parseInt(t.attributes.qtype.value)) {
+    switch (parseInt(t.attributes.qType.value)) {
         case (1):
             if (v < 0) v = 0;
         case (2):
@@ -197,7 +198,7 @@ function valueBlur(event) {
         default:
             return;
     }
-    ws.send("[" + (t.form.id == "settings" ? 4 : 5) + ",[" + n + "," + e + "," + t.value + "]]");
+    ws.send(`[${t.form.id == "settings" ? 4 : 5},[${n},${e},${v}]]`);
 }
 
 function gotPvList(pvs) {
@@ -216,7 +217,7 @@ function pvRegister(event) {
     t.value = 0;
     t.type = "number";
     //t.disabled = true;
-    ws.send("[6,[" + n + "," + e + "]]");
+    ws.send(`[6,[${n},${e}]]`);
 }
 
 function gotPv(pv) {
@@ -239,18 +240,19 @@ function clearLog() {
 function link() {
     for (let e of $("input[q-link]")) {
         let s = e.getAttribute("q-link").split("/");
-        let i = $("#" + s[0] + "s > fieldset[name=" + s[1] + "] > input[name=" + s[2] + "]")[0];
+        let i = $(`#${s[0]}s > fieldset[name=${s[1]}] > input[name=${s[2]}]`)[0];
         if (!i) continue;
         if (e.type == "text") e.type = i.type;
-        e.value = i.value;
         switch(s[0]) {
             case ("command"):
+                e.value = i.value;
                 e.onclick = () => {
                     i.dispatchEvent(new Event("click"));
                 };
                 break;
             case ("setting"):
             case ("parameter"):
+                e.value = i.value;
                 e.onblur = () => {
                     i.value = e.value;
                     i.dispatchEvent(new Event("blur"));
@@ -272,18 +274,19 @@ function link() {
     for (let div of $("div[q-log]")) {
         empty(div);
         let attrib = div.getAttribute("q-log");
+        let values = attrib.split(";");
         let csv = [];
         let a = document.createElement("a");
-        a.download = attrib.replace(/[,\/]/g, "-") + ".csv";
         a.style = "display: none";
         div.appendChild(a);
         let toggle = document.createElement("input");
         toggle.type = "button";
         toggle.value = "Ein";
-        div.appendChild(toggle);
+        let enabled = false;
         toggle.onclick = () => {
-            if (div.hasAttribute("q-enabled")) {
-                div.removeAttribute("q-enabled");
+            if (enabled) {
+                enabled = false;
+                a.download = `${values[0].replace(/\//g, "-")}_${new Date().toISOString()}.csv`;
                 let url = window.URL.createObjectURL(new Blob(csv, {type: "text/csv"}));
                 a.href = url;
                 a.click();
@@ -292,23 +295,23 @@ function link() {
                 stat.value = 0;
                 csv = [csv[0]];
             } else {
-                div.setAttribute("q-enabled", "true");
+                enabled = true;
                 toggle.value = "Aus / Download";
             }
         }
+        div.appendChild(toggle);
         let stat = document.createElement("input");
         stat.type = "number";
         stat.value = 0;
         stat.disabled = true;
         div.appendChild(stat);
-        csv.push("Time;" + attrib.replace(/,/g, ";") + "\n");
-        let values = attrib.split(",");
+        csv.push(`Time;${attrib}\n`);
         for (let [index, value] of values.entries()) {
             value = value.split("/");
-            let input = $("#" + value[0] + "s > fieldset[name=" + value[1] + "] > input[name=" + value[2] + "]")[0];
+            let input = $(`#${value[0]}s > fieldset[name=${value[1]}] > input[name=${value[2]}]`)[0];
             if (!input) continue;
             input.addEventListener("change", () => {
-                if (!div.hasAttribute("q-enabled")) return;
+                if (!enabled) return;
                 let row = [];
                 row.push(Date.now());
                 for (let i = 0; i < index; ++i) {
@@ -316,9 +319,28 @@ function link() {
                 }
                 row.push(input.value);
                 csv.push(row.join(";") + "\n");
-                stat.value = parseInt(stat.value) + 1;
+                stat.value = stat.valueAsNumber + 1;
             });
             if (input.value == "Registrieren") input.dispatchEvent(new Event("click"));
         }
     }
+}
+
+function animateQuadro() {
+    let orientation = [0, 0, 0];
+    let quadro = $("#quadro2")[0];
+    let inputs = $("input[q-link]", quadro);
+    let int = setInterval(() => {
+        orientation = [inputs[1].valueAsNumber, inputs[0].valueAsNumber, inputs[2].valueAsNumber];
+        if (orientation[0] > Math.PI / 2.0 || orientation[0] < -Math.PI / 2.0
+         || orientation[1] > Math.PI / 2.0 || orientation[1] < -Math.PI / 2.0) quadro.style.borderBottomColor = "blue";
+        else quadro.style.borderBottomColor = "red";
+        quadro.style.transform = `rotateZ(${orientation[2]}rad) rotateY(${orientation[1]}rad) rotateX(${orientation[0]}rad)`;
+    }, 50);
+    quadro.onclick = () => {
+        if (int) {
+            clearInterval(int);
+            int = 0;
+        } else animateQuadro();
+    };
 }
