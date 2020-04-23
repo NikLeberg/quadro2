@@ -148,6 +148,7 @@ static pv_t control_pvs[CONTROL_PV_MAX] = {
     PV("frontRight",    VALUE_TYPE_FLOAT),
     PV("backLeft",      VALUE_TYPE_FLOAT),
     PV("backRight",     VALUE_TYPE_FLOAT),
+    PV("maxThrottle",   VALUE_TYPE_NONE),
     PV("roll",          VALUE_TYPE_FLOAT),
     PV("pitch",         VALUE_TYPE_FLOAT),
     PV("heading",       VALUE_TYPE_FLOAT),
@@ -177,15 +178,6 @@ void control_task(void* arg);
  * control_command_t command: auszuführender Befehl
  */
 static void control_processCommand(control_command_t command);
-
-/*
- * Function: control_pidSet
- * ----------------------------
- * Setzt Gains des PID Reglers.
- * 
- * control_pid_t *pid: PID-Container der eingestellt werden soll
- */
-static void control_pidSet(control_pid_t *pid, float Kp, float Ki, float Kd, float band);
 
 /*
  * Function: control_pidCalculate
@@ -366,13 +358,6 @@ static void control_processCommand(control_command_t command) {
     return;
 }
 
-static void control_pidSet(control_pid_t *pid, float Kp, float Ki, float Kd, float band) {
-    pid->Kp = Kp;
-    pid->Ki = Ki;
-    pid->Kd = Kd;
-    pid->band = band;
-}
-
 static float control_pidCalculate(control_pid_t *pid, float setpoint, float feedback, TickType_t tick) {
     float gain;
     float error = setpoint - feedback;
@@ -408,8 +393,8 @@ static void control_position(vector_t setpoint, vector_t position) {
     // in die drei Achsenkomponenten aufteilen? x, y, z?
 }
 
-static void control_direction(float throttle, vector_t setpoint, vector_t velocity) {
-    // float throttle, woher kommt es, sollte dies nicht hir errechnet werden?
+static void control_direction(vector_t setpoint, vector_t velocity) {
+    // float throttle, woher kommt es, sollte dies nicht hier errechnet werden?
     bno_toWorldFrame(&setpoint, NULL);
     // rechne pids
     TickType_t tick = xTaskGetTickCount();
@@ -418,28 +403,36 @@ static void control_direction(float throttle, vector_t setpoint, vector_t veloci
         gain.v[i] = control_pidCalculate(&control.pids.direction[i], setpoint.v[i], velocity.v[i], tick);
     }
     bno_toLocalFrame(&gain, NULL);
-    // auf neue Eulerwinkel stabilisieren
-    vector_t euler;
-    bno_toEuler(&euler, NULL);
-    control_stabilize(throttle, gain, euler);
+    // x, y verschiebt Sollwinkel Roll, Pitch
+    float maxAngle = control.maxRollPitch / 2.0f; // Hälfte des sicheren Winkels
+    if ((gain.x > maxAngle) || (gain.x < -maxAngle)) {
+        gain.x = 0.0f;
+    }
+    if ((gain.y > maxAngle) || (gain.y < -maxAngle)) {
+        gain.y = 0.0f;
+    }
+    control.setpoints.euler.x = gain.x;
+    control.setpoints.euler.y = gain.y;
+    // z pusht throttle
+    control.throttle += gain.z;
+    if (gain.z > 1.0f) gain.z = 1.0f;
+    else if (gain.z < 0.0f) gain.z = 0.0f;
+    control_stabilize();
 }
 
 static void control_stabilize() {
-    // aktuelle Orientierung (Istwert)
-    vector_t euler;
+    vector_t euler; // aktuelle Orientierung (Istwert)
     bno_toEuler(&euler, NULL);
     pvPublishFloat(xControl, CONTROL_PV_ROLL, euler.x);
     pvPublishFloat(xControl, CONTROL_PV_PITCH, euler.y);
     pvPublishFloat(xControl, CONTROL_PV_HEADING, euler.z);
     // Sicherheit
-    if ((euler.x > 0 && euler.x > control.maxRollPitch)
-     || (euler.x < 0 && euler.x < -control.maxRollPitch)
-     || (euler.y > 0 && euler.y > control.maxRollPitch)
-     || (euler.y < 0 && euler.y < -control.maxRollPitch)) {
+    if (!control.armed) return;
+    if ((euler.x > control.maxRollPitch) || (euler.x < -control.maxRollPitch)
+     || (euler.y > control.maxRollPitch) || (euler.y < -control.maxRollPitch)) {
         ESP_LOGD("control", "max angle!");
         control_processCommand(CONTROL_COMMAND_DISARM);
     }
-    if (!control.armed) return;
     // rechne pids
     TickType_t tick = xTaskGetTickCount();
     vector_t gain; // - 1.0 bis + 1.0
@@ -449,10 +442,19 @@ static void control_stabilize() {
     }
     // throttle rechnen
     float throttles[MOTOR_MAX];
-    throttles[MOTOR_FRONT_LEFT] =   gain.x - gain.y + gain.z + control.throttle;
-    throttles[MOTOR_FRONT_RIGHT] = -gain.x - gain.y - gain.z + control.throttle;
-    throttles[MOTOR_BACK_LEFT]  =   gain.x + gain.y - gain.z + control.throttle;
-    throttles[MOTOR_BACK_RIGHT] =  -gain.x + gain.y + gain.z + control.throttle;
+    throttles[MOTOR_FRONT_LEFT] =   gain.x - gain.y + gain.z;
+    throttles[MOTOR_FRONT_RIGHT] = -gain.x - gain.y - gain.z;
+    throttles[MOTOR_BACK_LEFT]  =   gain.x + gain.y - gain.z;
+    throttles[MOTOR_BACK_RIGHT] =  -gain.x + gain.y + gain.z;
+    for (control_motors_t i = 0 ; i < MOTOR_MAX; ++i) {
+        if (throttles[i] + control.throttle > 1.0f) {
+            control.throttle = 1.0f - throttles[i];
+            pvPublish(xControl, CONTROL_PV_THROTTLE_MAX);
+        }
+    }
+    for (control_motors_t i = 0 ; i < MOTOR_MAX; ++i) {
+        throttles[i] += control.throttle;
+    }
     control_motorsThrottle(throttles);
 }
 
