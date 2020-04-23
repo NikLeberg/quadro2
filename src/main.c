@@ -40,12 +40,15 @@
     0.4	    145	    106	    62	
     0.5	    175	    128	    62	
     0.6	    211	    160		
-    0.7	    250	    190		
+    0.7	    250	    190		<
     0.8	    	    190		
     0.9	    	    197		
     1				
         >6A	?	<9V	
-
+    // Info
+    http://esp32.net/
+    // Schema
+    http://esp32.net/images/Ai-Thinker/NodeMCU-32S/Ai-Thinker_NodeMCU-32S_DiagramSchematic.png
     // Pinout
     https://cdn.instructables.com/FOL/YWLI/JEOILQ5U/FOLYWLIJEOILQ5U.LARGE.jpg?auto=webp&frame=1&width=1024&fit=bounds
 
@@ -71,9 +74,9 @@
 #define I2C_SDA             GPIO_NUM_33
 #define BNO_INTERRUPT       GPIO_NUM_35
 #define BNO_RESET           GPIO_NUM_32
-#define ULTRASONIC_TRIGGER  GPIO_NUM_26
+#define ULTRASONIC_TRIGGER  GPIO_NUM_26 // über Wiederstand-Spannungsteiler
 #define ULTRASONIC_ECHO     GPIO_NUM_27
-#define GPS_RX_HOST_TX      GPIO_NUM_17
+#define GPS_RX_HOST_TX      GPIO_NUM_17 // über 100 Ohm Wiederstand
 #define GPS_TX_HOST_RX      GPIO_NUM_16
 #define LED_I2C             GPIO_NUM_22
 #define MOTOR_FRONT_LEFT    GPIO_NUM_4
@@ -85,6 +88,8 @@
 // - Sensors X rechnet noch nicht mit Geschwindigkeit vom GPS
 // - libesphttpd besser portieren
 // - gps ubx Prüfsumme wird nicht geprüft
+// - json empfang NULL-Terminierung
+// - sensor timeout
 
 typedef enum {
     MAIN_PV_TICKS,
@@ -104,7 +109,7 @@ void app_main(void* arg) {
     esp_log_level_set("*", ESP_LOG_VERBOSE);
     ESP_LOGI("quadro2", "Version: %s - %s", __DATE__, __TIME__);
 
-    pvRegister(1, main_pvs);
+    pvRegister((QueueHandle_t)1, main_pvs);
 
     bool ret = false;
     ESP_LOGI("quadro2", "Starte Sensorik...");
@@ -132,7 +137,7 @@ void app_main(void* arg) {
     while (true) {
         vTaskDelay(2000 / portTICK_PERIOD_MS);
         currentTick = xTaskGetTickCount() * portTICK_PERIOD_MS;
-        pvPublishUint(1, MAIN_PV_TICKS, currentTick);
+        pvPublishUint((QueueHandle_t)1, MAIN_PV_TICKS, currentTick);
         // intercom_commandSend(xSensors, SENSORS_COMMAND_SET_HOME);
         // vTaskDelay(portMAX_DELAY);
     }
