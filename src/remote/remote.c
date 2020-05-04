@@ -25,6 +25,7 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 #define CONFIG_ESPHTTPD_TCP_NODELAY 1
+#define CONFIG_ESPHTTPD_PROC_PRI    5
 #include "esp.h" //libesphttpd
 #include "httpd.h"
 #include "httpd-freertos.h"
@@ -284,7 +285,7 @@ bool remote_init(char* ssid, char* pw) {
     settingRegister(xRemote, remote_settings);
     pvRegister(xRemote, remote_pvs);
     // Task starten
-    if (xTaskCreate(&remote_task, "remote", 3 * 1024, NULL, xRemote_PRIORITY, NULL) != pdTRUE) return true;
+    if (xTaskCreate(&remote_task, "remote", 4 * 1024, NULL, xRemote_PRIORITY, NULL) != pdTRUE) return true;
     // libesphttpd Bibliothek starten
 	if (httpdFreertosInit(&remote.httpd, builtInUrls, 80U, remote.httpdConn, REMOTE_CONNECTION_COUNT, HTTPD_FLAG_NONE)) return true;
 	if (httpdFreertosStart(&remote.httpd)) return true;
@@ -444,7 +445,7 @@ static void remote_messageProcess(char *message, size_t length) {
                         const json_t *jPv = (jPublisher) ? json_getSibling(jPublisher) : NULL;
                         if (jPv && json_getType(jPublisher) == JSON_INTEGER && json_getType(jPv) == JSON_INTEGER) { // valid
                             pv_t *pv;
-                            pv = intercom_pvSubscribe2(xRemote, json_getInteger(jPublisher), json_getInteger(jPv));
+                            pv = intercom_pvSubscribe2(xRemote, json_getInteger(jPublisher), json_getInteger(jPv), 100 / portTICK_PERIOD_MS);
                             if (pv && pv->type != VALUE_TYPE_NONE) remote_pvForward(pv); // zuletzt bekannter Zustand schicken
                         }
                     }

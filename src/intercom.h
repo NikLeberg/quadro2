@@ -242,13 +242,19 @@ const char* intercom_parameterNameParameter(uint32_t ownerNum, uint32_t settingN
 #define INTERCOM_PV_MAX_SUBSCRIBERS 3
 
 typedef struct {
+    QueueHandle_t handle;
+    TickType_t lastTick;
+    TickType_t minTicks;
+} pv_subscriber_t;
+
+typedef struct {
 	const char *name;
     value_type_t type;
     value_t value;
-    QueueHandle_t subscribers[INTERCOM_PV_MAX_SUBSCRIBERS];
+    pv_subscriber_t subscribers[INTERCOM_PV_MAX_SUBSCRIBERS];
 } pv_t;
 
-#define PV(name, type)  {(name), (type), {0}, {NULL}}
+#define PV(name, type)  {(name), (type), {0}, {{NULL}}}
 
 typedef struct pv_list_s {
     const char *task;
@@ -262,8 +268,8 @@ typedef struct pv_list_s {
 
 void intercom_pvRegister(QueueHandle_t publisher, pv_list_t *list);
 #define pvRegister(queue, pvs)      intercom_pvRegister(queue, &(pvs##_list))
-pv_t *intercom_pvSubscribe(QueueHandle_t subscriber, QueueHandle_t publisher, uint32_t pvNum);
-pv_t *intercom_pvSubscribe2(QueueHandle_t subscriber, uint32_t publisherNum, uint32_t pvNum);
+pv_t *intercom_pvSubscribe(QueueHandle_t subscriber, QueueHandle_t publisher, uint32_t pvNum, TickType_t minTicks);
+pv_t *intercom_pvSubscribe2(QueueHandle_t subscriber, uint32_t publisherNum, uint32_t pvNum, TickType_t minTicks);
 void intercom_pvUnsubscribeAll(QueueHandle_t subscriber);
 
 void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum, value_t value);

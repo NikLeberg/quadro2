@@ -36,6 +36,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/task.h"
 #include <string.h>
 #include <stdio.h>
 #include "nvs.h"
@@ -438,8 +439,8 @@ const char* intercom_parameterNameParameter(uint32_t ownerNum, uint32_t paramete
  *      PV_LIST("sensors", sensors_pvs, SENSORS_PV_MAX);
  *      pvRegister(xSensors, sensors_pvs);
  * 
- * 2. Subscriber-Task registriert sich für Updates:
- *      pv_t *subscription = intercom_pvSubscribe(xRemote, xSensors, SENSORS_PV_X);
+ * 2. Subscriber-Task registriert sich für Updates maximal alle minTicks:
+ *      pv_t *subscription = intercom_pvSubscribe(xRemote, xSensors, SENSORS_PV_X, minTicks);
  * 
  * 2. Publisher publiziert neue Werte an Intercom welche diese in die
  *    Empfangsqueues der registrierten Subscriber sendet:
@@ -483,27 +484,28 @@ static pv_list_t *intercom_pvSearchPublisher2(uint32_t publisherNum) {
     return node;
 }
 
-pv_t *intercom_pvSubscribe(QueueHandle_t subscriber, QueueHandle_t publisher, uint32_t pvNum) {
+pv_t *intercom_pvSubscribe(QueueHandle_t subscriber, QueueHandle_t publisher, uint32_t pvNum, TickType_t minTicks) {
     pv_list_t *node = intercom_pvSearchPublisher(publisher);
     if (!node || pvNum >= node->length) return NULL; // Pv nicht vorhanden
     pv_t *pv = &node->pvs[pvNum];
     // Subscriber speichern
     for (uint8_t i = 0; i <= INTERCOM_PV_MAX_SUBSCRIBERS; ++i) {
         if (i == INTERCOM_PV_MAX_SUBSCRIBERS) return NULL; // kein Platz verfügbar
-        if (pv->subscribers[i] == subscriber) { // bereits registriert, löschen
-            pv->subscribers[i] = NULL;
+        if (pv->subscribers[i].handle == subscriber) { // bereits registriert, löschen
+            pv->subscribers[i].handle = NULL;
             return NULL;
         }
-        if (pv->subscribers[i]) continue;
-        pv->subscribers[i] = subscriber;
+        if (pv->subscribers[i].handle) continue;
+        pv->subscribers[i].handle = subscriber;
+        pv->subscribers[i].minTicks = minTicks;
         break;
     }
     return pv;
 }
 
-pv_t *intercom_pvSubscribe2(QueueHandle_t subscriber, uint32_t publisherNum, uint32_t pvNum) {
+pv_t *intercom_pvSubscribe2(QueueHandle_t subscriber, uint32_t publisherNum, uint32_t pvNum, TickType_t minTicks) {
     pv_list_t *node = intercom_pvSearchPublisher2(publisherNum);
-    if (node) return intercom_pvSubscribe(subscriber, node->publisher, pvNum);
+    if (node) return intercom_pvSubscribe(subscriber, node->publisher, pvNum, minTicks);
     else return NULL;
 }
 
@@ -517,8 +519,8 @@ void intercom_pvUnsubscribeAll(QueueHandle_t subscriber) {
             pv_t *pv = &node->pvs[i];
             // über subscriber iterieren
             for (uint8_t j = 0; j < INTERCOM_PV_MAX_SUBSCRIBERS; ++j) {
-                if (pv->subscribers[j] == subscriber) { // registriert, löschen
-                    pv->subscribers[j] = NULL;
+                if (pv->subscribers[j].handle == subscriber) { // registriert, löschen
+                    pv->subscribers[j].handle = NULL;
                     continue;
                 }
             }
@@ -533,10 +535,16 @@ void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum, value_t value) 
     pv_t *pv = &node->pvs[pvNum];
     pv->value = value;
     // an alle Subscriber senden
+    TickType_t tick = xTaskGetTickCount();
     event_t event = {EVENT_PV, pv};
     for (uint8_t i = 0; i < INTERCOM_PV_MAX_SUBSCRIBERS; ++i) {
-        if (!pv->subscribers[i]) break;
-        xQueueSendToBack(pv->subscribers[i], &event, 0);
+        if (!pv->subscribers[i].handle) break;
+        if (pv->subscribers[i].minTicks) {
+            if (tick < pv->subscribers[i].lastTick + pv->subscribers[i].minTicks) continue;
+        }
+        if (xQueueSendToBack(pv->subscribers[i].handle, &event, 0) == pdTRUE) {
+            pv->subscribers[i].lastTick = tick;
+        }
     }
 }
 
