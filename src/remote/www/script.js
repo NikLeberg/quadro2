@@ -20,9 +20,7 @@ window.addEventListener("load", function(event) {
             else s.display = "none";
         };
     }
-    document.addEventListener("visibilitychange", function() {
-        ws.send("[1,0]");
-    });
+    document.onvisibilitychange = () => ws.send("[1,0]");
     animateQuadro();
 });
 
