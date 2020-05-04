@@ -59,7 +59,6 @@
 #include "freertos/task.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
-#include <stdio.h>
 #include "esp_log.h"
 
 /** Interne Abhängigkeiten **/
@@ -90,6 +89,7 @@
 // - gps ubx Prüfsumme wird nicht geprüft
 // - json empfang NULL-Terminierung
 // - sensor timeout
+// - rateUpdate von GPS und Ultarschall ungetestet
 
 typedef enum {
     MAIN_PV_TICKS,
@@ -133,12 +133,18 @@ void app_main(void* arg) {
 
     ESP_LOGI("quadro2", "Start dauerte: %lld", esp_timer_get_time());
 
+    vTaskPrioritySet(NULL, 1);
+
     // Main Loop
     while (true) {
         vTaskDelay(2000 / portTICK_PERIOD_MS);
         currentTick = xTaskGetTickCount() * portTICK_PERIOD_MS;
         pvPublishUint((QueueHandle_t)1, MAIN_PV_TICKS, currentTick);
-        // intercom_commandSend(xSensors, SENSORS_COMMAND_SET_HOME);
-        // vTaskDelay(portMAX_DELAY);
+        // Stats
+        // ESP_LOGD("stats", "Queue Load:");
+        // ESP_LOGD("sensors", "%d von 16", uxQueueMessagesWaiting(xSensors));
+        // ESP_LOGD("bno", "%d von 4", uxQueueMessagesWaiting(xBno));
+        // ESP_LOGD("remote", "%d von 32", uxQueueMessagesWaiting(xRemote));
+        // ESP_LOGD("control", "%d von 16", uxQueueMessagesWaiting(xControl));
     }
 }
