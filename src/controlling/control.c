@@ -25,10 +25,6 @@
 
 #include "intercom.h"
 #include "resources.h"
-// motors
-// pid?
-// actions?
-// modes?
 #include "sensing/sensor_types.h"
 #include "sensing/sensors.h"
 #include "sensing/bno.h"
@@ -154,7 +150,8 @@ static pv_t control_pvs[CONTROL_PV_MAX] = {
     PV("heading",       VALUE_TYPE_FLOAT),
     PV("xOut",          VALUE_TYPE_FLOAT),
     PV("yOut",          VALUE_TYPE_FLOAT),
-    PV("zOut",          VALUE_TYPE_FLOAT)
+    PV("zOut",          VALUE_TYPE_FLOAT),
+    PV("rate",          VALUE_TYPE_UINT)
 };
 static PV_LIST("control", control_pvs, CONTROL_PV_MAX);
 
@@ -246,9 +243,9 @@ bool control_init(gpio_num_t motorFrontLeft, gpio_num_t motorFrontRight,
     bool ret = false;
     ledc_timer_config_t ledcConfig = {
         speed_mode:         LEDC_HIGH_SPEED_MODE,
-        {duty_resolution:   LEDC_TIMER_20_BIT},
+        {duty_resolution:   LEDC_TIMER_18_BIT},
         timer_num:          LEDC_TIMER_0,
-        freq_hz:            50
+        freq_hz:            CONTROL_MOTOR_FREQUENCY
     };
     ret = ledc_timer_config(&ledcConfig);
     ledc_channel_config_t ledcChannel = {
@@ -283,11 +280,11 @@ void control_task(void* arg) {
     // Variablen
     event_t event;
     // PVs empfangen
-    pv_t *pvRemoteConnection = intercom_pvSubscribe(xControl, xRemote, REMOTE_PV_CONNECTIONS); // UInt
-    pv_t *pvRemoteTimeout = intercom_pvSubscribe(xControl, xRemote, REMOTE_PV_TIMEOUT); // Event
-    pv_t *pvRemoteState = intercom_pvSubscribe(xControl, xRemote, REMOTE_PV_STATE_ERROR); // Event
-    pv_t *pvSensorsOrientation = intercom_pvSubscribe(xControl, xSensors, SENSORS_PV_ORIENTATION); // Event
-    pv_t *pvSensorsTimeout = intercom_pvSubscribe(xControl, xSensors, SENSORS_PV_TIMEOUT);
+    pv_t *pvRemoteConnection = intercom_pvSubscribe(xControl, xRemote, REMOTE_PV_CONNECTIONS, 0); // UInt
+    pv_t *pvRemoteTimeout = intercom_pvSubscribe(xControl, xRemote, REMOTE_PV_TIMEOUT, 0); // Event
+    pv_t *pvRemoteState = intercom_pvSubscribe(xControl, xRemote, REMOTE_PV_STATE_ERROR, 0); // Event
+    pv_t *pvSensorsOrientation = intercom_pvSubscribe(xControl, xSensors, SENSORS_PV_ORIENTATION, 0); // Event
+    pv_t *pvSensorsTimeout = intercom_pvSubscribe(xControl, xSensors, SENSORS_PV_TIMEOUT, 0);
     // Loop
     while (true) {
         xQueueReceive(xControl, &event, portMAX_DELAY);
@@ -426,6 +423,11 @@ static void control_stabilize() {
     pvPublishFloat(xControl, CONTROL_PV_ROLL, euler.x);
     pvPublishFloat(xControl, CONTROL_PV_PITCH, euler.y);
     pvPublishFloat(xControl, CONTROL_PV_HEADING, euler.z);
+    // Loop Rate
+    static int64_t lastTime = 0;
+    int64_t now = esp_timer_get_time();
+    pvPublishUint(xControl, CONTROL_PV_RATE, (uint32_t)now - lastTime);
+    lastTime = now;
     // Sicherheit
     if (!control.armed) return;
     if ((euler.x > control.maxRollPitch) || (euler.x < -control.maxRollPitch)

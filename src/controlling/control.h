@@ -23,7 +23,8 @@
 
 /** Compiler Einstellungen **/
 
-#define CONTROL_MOTOR_DUTY_MIN  ((0x1 << LEDC_TIMER_20_BIT) - 1) / 20
+#define CONTROL_MOTOR_FREQUENCY 200
+#define CONTROL_MOTOR_DUTY_MIN  ((0x1 << LEDC_TIMER_18_BIT) - 1) / (1000 / CONTROL_MOTOR_FREQUENCY)
 #define CONTROL_MOTOR_DUTY_MAX  CONTROL_MOTOR_DUTY_MIN * 2
 
 
@@ -92,6 +93,7 @@ typedef enum {
     CONTROL_PV_OUT_X,
     CONTROL_PV_OUT_Y,
     CONTROL_PV_OUT_Z,
+    CONTROL_PV_RATE,
     CONTROL_PV_MAX
 } control_pv_t;
 
