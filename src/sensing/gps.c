@@ -130,7 +130,7 @@ static void gps_uartRxFifoReset();
 
 /** Implementierung **/
 
-bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
+bool gps_init(gpio_num_t rxPin, gpio_num_t txPin, uint32_t rate) {
     // Input Queue erstellen
     gps.position.type = SENSORS_POSITION;
     gps.speed.type = SENSORS_GROUNDSPEED;
@@ -177,8 +177,8 @@ bool gps_init(gpio_num_t rxPin, gpio_num_t txPin) {
     uint8_t msgMessages[] = {0xB5, 0x62, 0x06, 0x01, 0x03, 0x00, 0x01, 0x07, 0x01, 0x13, 0x51};
     if (gps_sendUBX(msgMessages, sizeof(msgMessages), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
     // UBX-CFG-RATE: Daten-Rate setzen
-    uint8_t msgRate[] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, (0xff & GPS_DATA_RATE_MS),
-                        (GPS_DATA_RATE_MS >> 8), 0x01, 0x00, 0x00, 0x00, NULL, NULL};
+    uint8_t msgRate[] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, (0xff & rate),
+                        (rate >> 8), 0x01, 0x00, 0x00, 0x00, NULL, NULL};
     if (gps_sendUBX(msgRate, sizeof(msgRate), true, 1000 / portTICK_PERIOD_MS)) return true; // NAK Empfangen
     // Task starten
     if (xTaskCreate(&gps_task, "gps", 3 * 1024, NULL, xSensors_PRIORITY - 1, NULL) != pdTRUE) return true;
@@ -228,6 +228,14 @@ void gps_task(void* arg) {
         gps.forward.data = &gps.speed;
         xQueueSendToBack(xSensors, &gps.forward, 0);
     }
+}
+
+void gps_updateRate(uint32_t rate) {
+    // UBX-CFG-RATE: Daten-Rate setzen
+    uint8_t msgRate[] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, (0xff & rate),
+                        (rate >> 8), 0x01, 0x00, 0x00, 0x00, NULL, NULL};
+    bool result = gps_sendUBX(msgRate, sizeof(msgRate), true, 100 / portTICK_PERIOD_MS);
+    ESP_LOGD("gps", "update rate: %u", result);
 }
 
 static bool gps_sendUBX(uint8_t *buffer, uint8_t length, bool aknowledge, TickType_t timeout) {

@@ -57,6 +57,7 @@ static struct {
     sh2_rxCallback_t *onRx;
     uint8_t rxBuffer[SH2_HAL_MAX_TRANSFER];
     SemaphoreHandle_t sh2Lock;
+    uint32_t timeout;
 
     sensors_event_t acceleration;
     sensors_event_t orientation;
@@ -64,7 +65,7 @@ static struct {
     event_t forward;
 } bno;
 
-static QueueHandle_t xBno;
+QueueHandle_t xBno;
 
 
 /** Private Functions **/
@@ -124,7 +125,8 @@ static bool bno_sensorEnable(sh2_SensorId_t sensorId, uint32_t interval_us);
 
 /** Implementierung **/
 
-bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin) {
+bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin,
+              uint32_t rateOrientation, uint32_t rateAcceleration, uint32_t ratePressure) {
     // Parameter speichern
     bno.address = address;
     bno.interruptPin = interruptPin;
@@ -153,6 +155,7 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin) {
     gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
     if (gpio_isr_handler_add(interruptPin, &bno_interrupt, NULL)) return true;
     // Task starten
+    bno.timeout = (rateOrientation / portTICK_PERIOD_MS) + 1;
     if (xTaskCreate(&bno_task, "bno", 3 * 1024, NULL, xSensors_PRIORITY - 1, NULL) != pdTRUE) return true;
     // SensorHub-2 Bibliothek starten
     bno.sh2Lock = xSemaphoreCreateBinary();
@@ -162,9 +165,9 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin) {
     vSemaphoreDelete(sInitDone);
     // Standartsensoren aktivieren
     if (sh2_setSensorCallback(&bno_sensorEvent, NULL)) return true;
-    if (bno_sensorEnable(SH2_ROTATION_VECTOR, BNO_DATA_RATE_QUAT_US)) return true;
-    if (bno_sensorEnable(SH2_LINEAR_ACCELERATION, BNO_DATA_RATE_ACCEL_US)) return true;
-    if (bno_sensorEnable(SH2_PRESSURE, BNO_DATA_RATE_PRESSURE_US)) return true;
+    if (bno_sensorEnable(SH2_ROTATION_VECTOR, rateOrientation * 1000)) return true;
+    if (bno_sensorEnable(SH2_LINEAR_ACCELERATION, rateAcceleration * 1000)) return true;
+    if (bno_sensorEnable(SH2_PRESSURE, ratePressure * 1000)) return true;
     return false;
 }
 
@@ -175,7 +178,7 @@ void bno_task(void* arg) {
     uint8_t timeoutCount = 0;
     // Loop
     while (true) {
-        if (xQueueReceive(xBno, &event, (BNO_DATA_RATE_QUAT_US / 1000 / portTICK_PERIOD_MS) + 1) == pdTRUE) {
+        if (xQueueReceive(xBno, &event, bno.timeout) == pdTRUE) {
             // ist sh2-Lib registriert?
             if (!bno.onRx) continue;
             // Datenlänge berechnen, mindestens Header, maximal MAX_TRANSFER
@@ -345,36 +348,17 @@ static void bno_initDone(void *cookie, sh2_AsyncEvent_t *event) {
     }
 }
 
-void bno_recover(uint8_t level) {
+void bno_updateRate(uint32_t rateOrientation, uint32_t rateAcceleration, uint32_t ratePressure) {
     int32_t result;
-    switch (level) {
-        case (0): { // Level 0 - Report neu aktivieren
-            result = bno_sensorEnable(SH2_ROTATION_VECTOR, BNO_DATA_RATE_QUAT_US);
-            ESP_LOGD("bno", "enable quat: %i", result);
-            result = bno_sensorEnable(SH2_LINEAR_ACCELERATION, BNO_DATA_RATE_ACCEL_US);
-            ESP_LOGD("bno", "enable accel: %i", result);
-            result = bno_sensorEnable(SH2_PRESSURE, BNO_DATA_RATE_PRESSURE_US);
-            ESP_LOGD("bno", "enable press: %i", result);
-            break;
-        }
-        case (1): { // Level 1 - sh2 Reinitialisieren
-            result = sh2_reinitialize();
-            ESP_LOGD("bno", "reinit: %i", result);
-            break;
-        }
-        case (2): { // Level 2 - Hard Reset
-            bno.onRx = NULL;
-            SemaphoreHandle_t sInitDone = xSemaphoreCreateBinary();
-            result = sh2_initialize(&bno_initDone, sInitDone);
-            ESP_LOGD("bno", "init: %i", result);
-            result = xSemaphoreTake(sInitDone, BNO_STARTUP_WAIT_MS / portTICK_PERIOD_MS);
-            ESP_LOGD("bno", "init wait: %i", result);
-            vSemaphoreDelete(sInitDone);
-            break;
-        }
-        default:
-            break;
-    }
+    result = sh2_reinitialize();
+    ESP_LOGD("bno", "reinit: %i", result);
+    bno.timeout = (rateOrientation / portTICK_PERIOD_MS) + 1;
+    result = bno_sensorEnable(SH2_ROTATION_VECTOR, rateOrientation * 1000);
+    ESP_LOGD("bno", "enable quat: %i", result);
+    result = bno_sensorEnable(SH2_LINEAR_ACCELERATION, rateAcceleration * 1000);
+    ESP_LOGD("bno", "enable accel: %i", result);
+    result = bno_sensorEnable(SH2_PRESSURE, ratePressure * 1000);
+    ESP_LOGD("bno", "enable press: %i", result);
 }
 
 /** sh2-hal Implementierung (sh2_hal.h) **/

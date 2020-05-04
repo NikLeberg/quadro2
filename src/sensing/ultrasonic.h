@@ -19,7 +19,6 @@
 
 /** Einstellungen **/
 
-#define ULT_DATA_RATE_MS    100  // 100 ms
 #define ULT_MAX_CM          5.0f // 5 m
 #define ULT_NO_GROUND_COUNT 256
 #define ULT_NO_GROUND_WAIT  1000 // 1 s
@@ -32,7 +31,8 @@
  *
  * gpio_num_t triggerPin: Trigger Pin, Output
  * gpio_num_t echoPin: Echo Pin, Input
+ * uint32_t *rate: Datenrate, reagiert bei Änderung automatisch
  *
  * returns: false -> Erfolg, true -> Error
  */
-bool ult_init(gpio_num_t triggerPin, gpio_num_t echoPin);
+bool ult_init(gpio_num_t triggerPin, gpio_num_t echoPin, uint32_t *rate);

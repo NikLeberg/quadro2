@@ -30,7 +30,17 @@
  * 
  * gpio_num_t rxPin: UART Data-In
  * gpio_num_t txPin: UART Data-Out
+ * uint32_t *rate: Datenrate, reagiert bei Änderung automatisch
  *
  * returns: false -> Erfolg, true -> Error
  */
-bool gps_init(gpio_num_t rxPin, gpio_num_t txPin);
+bool gps_init(gpio_num_t rxPin, gpio_num_t txPin, uint32_t rate);
+
+/*
+ * Function: gps_updateRate
+ * ----------------------------
+ * Setze Sensorreport auf gewünschte Datenraten.
+ *
+ * uint32_t rate: neue Datenrate
+ */
+void gps_updateRate(uint32_t rate);

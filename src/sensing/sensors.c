@@ -67,6 +67,12 @@
 struct sensors_t {
     uint32_t timeout; // in us;
 
+    struct {
+        uint32_t fast;   // schnelle Sensorik: Orientierung
+        uint32_t medium; // mittlere Sensorik: Beschleunigung, Ultraschall
+        uint32_t slow;   // langsame Sensorik: GPS, Barometer
+    } rate;
+
     struct { // Fusion der Z Achse (Altitude)
         eekf_context ekf;
         eekf_mat x, P, z;
@@ -106,14 +112,15 @@ static command_t sensors_commands[SENSORS_COMMAND_MAX] = {
     COMMAND("setAltimeterToGPS"),
     COMMAND("resetFusion"),
     COMMAND("resetQueue"),
-    COMMAND("recoverBNO0"),
-    COMMAND("recoverBNO1"),
-    COMMAND("recoverBNO2")
+    COMMAND("updateRate")
 };
 static COMMAND_LIST("sensors", sensors_commands, SENSORS_COMMAND_MAX);
 
 static setting_t sensors_settings[SENSORS_SETTING_MAX] = {
     SETTING("timeout",          &sensors.timeout,               VALUE_TYPE_UINT),
+    SETTING("rateFast",         &sensors.rate.fast,             VALUE_TYPE_UINT),
+    SETTING("rateMedium",       &sensors.rate.medium,           VALUE_TYPE_UINT),
+    SETTING("rateSlow",         &sensors.rate.slow,             VALUE_TYPE_UINT),
 
     SETTING("zErrAccel",        &sensors.Z.errorAcceleration,   VALUE_TYPE_FLOAT),
     SETTING("zErrUltrasonic",   &sensors.Z.errorUltrasonic,     VALUE_TYPE_FLOAT),
@@ -194,15 +201,15 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     ESP_LOGD("sensors", "I2C %s", ret ? "error" : "ok");
     // BNO initialisieren + Reports für Beschleunigung, Orientierung und Druck aktivieren
     ESP_LOGD("sensors", "BNO init");
-    ret = bno_init(bnoAddr, bnoInterrupt, bnoReset);
+    ret = bno_init(bnoAddr, bnoInterrupt, bnoReset, sensors.rate.fast, sensors.rate.medium, sensors.rate.slow);
     ESP_LOGD("sensors", "BNO %s", ret ? "error" : "ok");
     // Ultraschall initialisieren
     ESP_LOGD("sensors", "ULT init");
-    ret = ult_init(ultTrigger, ultEcho);
+    ret = ult_init(ultTrigger, ultEcho, &sensors.rate.slow);
     ESP_LOGD("sensors", "ULT %s", ret ? "error" : "ok");
     // GPS initialisieren
     ESP_LOGD("sensors", "GPS init");
-    ret = gps_init(gpsRxPin, gpsTxPin);
+    ret = gps_init(gpsRxPin, gpsTxPin, sensors.rate.slow);
     ESP_LOGD("sensors", "GPS %s", ret ? "error" : "ok");
     // Kalman Filter Z initialisieren
     EEKF_CALLOC_MATRIX(sensors.Z.x, 2, 1); // 2 States: Position, Geschwindigkeit
@@ -285,14 +292,9 @@ static void sensors_processCommand(sensors_command_t command) {
         case (SENSORS_COMMAND_RESET_QUEUE):
             xQueueReset(xSensors);
             break;
-        case (SENSORS_COMMAND_RECOVER_BNO0):
-            bno_recover(0);
-            break;
-        case (SENSORS_COMMAND_RECOVER_BNO1):
-            bno_recover(1);
-            break;
-        case (SENSORS_COMMAND_RECOVER_BNO2):
-            bno_recover(2);
+        case (SENSORS_COMMAND_UPDATE_RATE):
+            bno_updateRate(sensors.rate.fast, sensors.rate.medium, sensors.rate.slow);
+            gps_updateRate(sensors.rate.slow);
             break;
         default:
             break;

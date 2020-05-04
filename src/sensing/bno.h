@@ -20,9 +20,6 @@
 
 /** Einstellungen **/
 
-#define BNO_DATA_RATE_QUAT_US       20000   // 20 ms
-#define BNO_DATA_RATE_ACCEL_US      40000   // 40 ms
-#define BNO_DATA_RATE_PRESSURE_US   100000  // 100 ms
 #define BNO_STARTUP_WAIT_MS         1000    // 1 s
 
 
@@ -34,10 +31,14 @@
  * uint8_t bnoAddr: BNO I2C Adresse
  * gpio_num_t bnoInterrupt: BNO Interrupt Pin (Data ready)
  * gpio_num_t bnoReset: BNO Reset Pin
+ * uint32_t rateOrientation: Datenrate Orientierung
+ * uint32_t rateAcceleration: Datenrate Beschleunigung
+ * uint32_t ratePressure: Datenrate Barometer
  *
  * returns: false -> Erfolg, true -> Error
  */
-bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin);
+bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin,
+              uint32_t rateOrientation, uint32_t rateAcceleration, uint32_t ratePressure);
 
 /*
  * Function: bno_toWorldFrame
@@ -72,10 +73,13 @@ void bno_toLocalFrame(vector_t *vector, orientation_t *quaternion);
 void bno_toEuler(vector_t *euler, orientation_t *quaternion);
 
 /*
- * Function: bno_recover
+ * Function: bno_updateRate
  * ----------------------------
- * Versuche Kommunikation zu bno wiederherzustellen.
+ * Setze Sensorreports auf gewünschte Datenraten.
+ * Kann Fehlerhafte Sensoren reaktivieren.
  *
- * uint8_t level: 0 - Reports erneut aktivieren, 1 - sh2 reinitialisieren, 2 - hard reset
+ * uint32_t rateOrientation: Datenrate Orientierung
+ * uint32_t rateAcceleration: Datenrate Beschleunigung
+ * uint32_t ratePressure: Datenrate Barometer
  */
-void bno_recover(uint8_t level);
+void bno_updateRate(uint32_t rateOrientation, uint32_t rateAcceleration, uint32_t ratePressure);

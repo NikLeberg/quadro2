@@ -34,6 +34,7 @@ typedef struct __attribute__((packed)) {
 
 static struct {
     gpio_num_t triggerPin, echoPin;
+    uint32_t *rate;
 
     sensors_event_t distance;
     event_t forward;
@@ -66,10 +67,11 @@ static void IRAM_ATTR ult_interrupt(void* arg);
 
 /** Implementierung **/
 
-bool ult_init(gpio_num_t triggerPin, gpio_num_t echoPin) {
+bool ult_init(gpio_num_t triggerPin, gpio_num_t echoPin, uint32_t *rate) {
     // Parameter speichern
     ult.triggerPin = triggerPin;
     ult.echoPin = echoPin;
+    ult.rate = rate;
     // Input Queue erstellen
     xUlt = xQueueCreate(3, sizeof(ult_event_t));
     ult.distance.type = SENSORS_ULTRASONIC;
@@ -117,7 +119,7 @@ void ult_task(void* arg) {
         if (noGroundSince > ULT_NO_GROUND_COUNT) { // verringere Frequenz wenn kein Boden in messbarer Nähe
             vTaskDelayUntil(&lastWakeTime, ULT_NO_GROUND_WAIT / portTICK_PERIOD_MS);
         } else {
-            vTaskDelayUntil(&lastWakeTime, ULT_DATA_RATE_MS / portTICK_PERIOD_MS);
+            vTaskDelayUntil(&lastWakeTime, *ult.rate / portTICK_PERIOD_MS);
         }
         // Starte Messung, Trigger HIGH -> LOW
         gpio_set_level(ult.triggerPin, 0);
