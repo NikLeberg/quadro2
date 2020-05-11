@@ -251,10 +251,11 @@ typedef struct {
 	const char *name;
     value_type_t type;
     value_t value;
+    TickType_t tick;
     pv_subscriber_t subscribers[INTERCOM_PV_MAX_SUBSCRIBERS];
 } pv_t;
 
-#define PV(name, type)  {(name), (type), {0}, {{NULL}}}
+#define PV(name, type)  {(name), (type), {0}, 0, {{NULL}}}
 
 typedef struct pv_list_s {
     const char *task;
@@ -283,6 +284,7 @@ void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum, value_t value);
 #define pvGetInt(pv)        ((pv && (pv->type == VALUE_TYPE_INT)) ? pv->value.i : 0L)
 #define pvGetFloat(pv)      ((pv && (pv->type == VALUE_TYPE_FLOAT)) ? pv->value.f : 0.0f)
 #define pvGetPointer(pv)    ((pv && (pv->type == VALUE_TYPE_POINTER)) ? pv->value.p : NULL)
+#define pvGetTick(pv)       (pv ? pv->tick : 0)
 
 const char* intercom_pvNamePublisher(uint32_t ownerNum);
 const char* intercom_pvNamePv(uint32_t ownerNum, uint32_t settingNum);

@@ -535,15 +535,15 @@ void intercom_pvPublish(QueueHandle_t publisher, uint32_t pvNum, value_t value) 
     pv_t *pv = &node->pvs[pvNum];
     pv->value = value;
     // an alle Subscriber senden
-    TickType_t tick = xTaskGetTickCount();
+    pv->tick = xTaskGetTickCount();
     event_t event = {EVENT_PV, pv};
     for (uint8_t i = 0; i < INTERCOM_PV_MAX_SUBSCRIBERS; ++i) {
         if (!pv->subscribers[i].handle) break;
         if (pv->subscribers[i].minTicks) {
-            if (tick < pv->subscribers[i].lastTick + pv->subscribers[i].minTicks) continue;
+            if (pv->tick < pv->subscribers[i].lastTick + pv->subscribers[i].minTicks) continue;
         }
         if (xQueueSendToBack(pv->subscribers[i].handle, &event, 0) == pdTRUE) {
-            pv->subscribers[i].lastTick = tick;
+            pv->subscribers[i].lastTick = pv->tick;
         }
     }
 }

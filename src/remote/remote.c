@@ -115,7 +115,7 @@ typedef enum {
     REMOTE_MESSAGE_COMMAND,     // JSON: [ Owner, Command ]
     REMOTE_MESSAGE_SETTING,     // JSON: [ Owner, Setting, Wert ] -> mit Wert: Schreiben, ohne: Lesen
     REMOTE_MESSAGE_PARAMETER,   // JSON: [ Owner, Parameter, Wert ] -> mit Wert: Schreiben, ohne: Lesen
-    REMOTE_MESSAGE_PV,          // JSON: [ Publisher, PV, Wert ] -> mit Wert: Publication, ohne: Subscribe
+    REMOTE_MESSAGE_PV,          // JSON: [ Publisher, PV, Wert, Tick ] -> mit Wert: Publication, ohne: Subscribe
     REMOTE_MESSAGE_COMMANDS,    // JSON: [ [ "owner", [ "command1", "command2", ... ] ], ... ]
     REMOTE_MESSAGE_SETTINGS,    // JSON: [ [ "owner", [ "setting1", "setting2", ... ] ], ... ]
     REMOTE_MESSAGE_PARAMETERS,  // JSON: [ [ "owner", [ "parameter1", "parameter2", ... ] ], ... ]
@@ -392,16 +392,16 @@ static void remote_pvForward(pv_t *pv) {
     size_t length;
     switch (pv->type) {
         case (VALUE_TYPE_NONE):
-            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,true]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_NONE);
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,true,%u]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_NONE, pv->tick);
             break;
         case (VALUE_TYPE_UINT):
-            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,%u]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_UINT, pv->value.ui);
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,%u,%u]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_UINT, pv->value.ui, pv->tick);
             break;
         case (VALUE_TYPE_INT):
-            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,%d]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_INT, pv->value.i);
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,%d,%u]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_INT, pv->value.i, pv->tick);
             break;
         case (VALUE_TYPE_FLOAT):
-            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,%.9g]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_FLOAT, pv->value.f);
+            length = snprintf(buffer, sizeof(buffer), "[%d,[%u,%u,%d,%.9g,%u]]", REMOTE_MESSAGE_PV, subscriberNum, pvNum, VALUE_TYPE_FLOAT, pv->value.f, pv->tick);
             break;
         default:
             return;
