@@ -116,7 +116,8 @@ void app_main(void* arg) {
     ret = sensors_init(I2C_SCL, I2C_SDA,
                        0x4A, BNO_INTERRUPT, BNO_RESET,
                        ULTRASONIC_TRIGGER, ULTRASONIC_ECHO,
-                       GPS_TX_HOST_RX, GPS_RX_HOST_TX);
+                       GPS_TX_HOST_RX, GPS_RX_HOST_TX,
+                       0x40);
     ESP_LOGI("quadro2", "Status Sensorik: %s", ret ? "Error" : "Ok");
 
     ESP_LOGI("quadro2", "Starte Remote...");

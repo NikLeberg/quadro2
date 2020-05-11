@@ -57,6 +57,7 @@
 #include "bno.h"
 #include "ultrasonic.h"
 #include "gps.h"
+#include "ina.h"
 #include "eekf.h"
 #include "sensor_types.h"
 #include "sensors.h"
@@ -104,6 +105,11 @@ struct sensors_t {
         float distance;
         vector_t position;
     } homes;
+
+    struct {
+        float warning;
+        float low;
+    } voltage;
 };
 static struct sensors_t sensors;
 
@@ -136,7 +142,10 @@ static setting_t sensors_settings[SENSORS_SETTING_MAX] = {
     SETTING("xErrAccel",        &sensors.X.errorAcceleration,   VALUE_TYPE_FLOAT),
     SETTING("xErrGPS",          &sensors.X.errorGPS,            VALUE_TYPE_FLOAT),
     SETTING("xErrVelocity",     &sensors.X.errorVelocity,       VALUE_TYPE_FLOAT),
-    SETTING("xLimitVelocity",   &sensors.X.limitVelocity,       VALUE_TYPE_FLOAT)
+    SETTING("xLimitVelocity",   &sensors.X.limitVelocity,       VALUE_TYPE_FLOAT),
+
+    SETTING("voltWarning",      &sensors.voltage.warning,       VALUE_TYPE_FLOAT),
+    SETTING("voltLow",          &sensors.voltage.low,           VALUE_TYPE_FLOAT)
 };
 static SETTING_LIST("sensors", sensors_settings, SENSORS_SETTING_MAX);
 
@@ -148,7 +157,10 @@ static pv_t sensors_pvs[SENSORS_PV_MAX] = {
     PV("y", VALUE_TYPE_FLOAT),
     PV("vy", VALUE_TYPE_FLOAT),
     PV("z", VALUE_TYPE_FLOAT),
-    PV("vz", VALUE_TYPE_FLOAT)
+    PV("vz", VALUE_TYPE_FLOAT),
+    PV("volt", VALUE_TYPE_FLOAT),
+    PV("voltWarning", VALUE_TYPE_NONE),
+    PV("voltLow", VALUE_TYPE_FLOAT)
 };
 static PV_LIST("sensors", sensors_pvs, SENSORS_PV_MAX);
 
@@ -185,9 +197,10 @@ eekf_return sensors_fuseX_measurement(eekf_mat* zp, eekf_mat* Jh, eekf_mat const
 /** Implementierung **/
 
 bool sensors_init(gpio_num_t scl, gpio_num_t sda,                                   // I2C
-                  uint8_t bnoAddr, gpio_num_t bnoInterrupt, gpio_num_t bnoReset,    // BNO080
+                  uint8_t bnoAddress, gpio_num_t bnoInterrupt, gpio_num_t bnoReset, // BNO080
                   gpio_num_t ultTrigger, gpio_num_t ultEcho,                        // Ultraschall
-                  gpio_num_t gpsRxPin, gpio_num_t gpsTxPin) {                       // GPS
+                  gpio_num_t gpsRxPin, gpio_num_t gpsTxPin,                         // GPS
+                  uint8_t inaAddress) {                                             // INA219
     // Intercom-Queue erstellen
     xSensors = xQueueCreate(16, sizeof(event_t));
     // an Intercom anbinden
@@ -201,7 +214,7 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     ESP_LOGD("sensors", "I2C %s", ret ? "error" : "ok");
     // BNO initialisieren + Reports für Beschleunigung, Orientierung und Druck aktivieren
     ESP_LOGD("sensors", "BNO init");
-    ret = bno_init(bnoAddr, bnoInterrupt, bnoReset, sensors.rate.fast, sensors.rate.medium, sensors.rate.slow);
+    ret = bno_init(bnoAddress, bnoInterrupt, bnoReset, sensors.rate.fast, sensors.rate.medium, sensors.rate.slow);
     ESP_LOGD("sensors", "BNO %s", ret ? "error" : "ok");
     // Ultraschall initialisieren
     ESP_LOGD("sensors", "ULT init");
@@ -210,6 +223,10 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     // GPS initialisieren
     ESP_LOGD("sensors", "GPS init");
     ret = gps_init(gpsRxPin, gpsTxPin, sensors.rate.slow);
+    ESP_LOGD("sensors", "GPS %s", ret ? "error" : "ok");
+    // Spannungssensor INA initialisieren
+    ESP_LOGD("sensors", "INA init");
+    ret = ina_init(inaAddress, &sensors.rate.slow);
     ESP_LOGD("sensors", "GPS %s", ret ? "error" : "ok");
     // Kalman Filter Z initialisieren
     EEKF_CALLOC_MATRIX(sensors.Z.x, 2, 1); // 2 States: Position, Geschwindigkeit
@@ -337,6 +354,14 @@ static void sensors_processData(sensors_event_t *event) {
             sensors_fuseY(event->type, event->vector.y, event->timestamp);
             // sensors_fuseZ(event->type, event->vector.z, event->timestamp);
             break;
+        case (SENSORS_VOLTAGE):
+            if (event->value < sensors.voltage.warning) {
+                pvPublish(xSensors, SENSORS_PV_VOLTAGE_WARN);
+            }
+            if (event->value < sensors.voltage.low) {
+                pvPublish(xSensors, SENSORS_PV_VOLTAGE_LOW);
+            }
+            pvPublishFloat(xSensors, SENSORS_PV_VOLTAGE, event->value);
         default:
             break;
     }

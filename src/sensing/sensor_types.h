@@ -26,6 +26,7 @@ typedef enum {
     SENSORS_ULTRASONIC, // m
     SENSORS_POSITION, // GPS Fix lat/lon/alt
     SENSORS_GROUNDSPEED, // m/s
+    SENSORS_VOLTAGE, // V
     SENSORS_MAX
 } sensors_event_type_t;
 
@@ -47,6 +48,7 @@ typedef struct {
     sensors_event_type_t type;
     int64_t timestamp;
     union {
+        float value;
         vector_t vector;
         orientation_t orientation;
     };

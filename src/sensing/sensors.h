@@ -87,6 +87,9 @@ typedef enum {
     SENSORS_SETTING_FUSE_X_ERROR_GPS,
     SENSORS_SETTING_FUSE_X_ERROR_VELOCITY,
     SENSORS_SETTING_FUSE_X_LIMIT_VEL,
+    // Spannungslimits
+    SENSORS_SETTING_VOLTAGE_WARNING,
+    SENSORS_SETTING_VOLTAGE_LOW,
     SENSORS_SETTING_MAX
 } sensors_setting_t;
 
@@ -105,6 +108,9 @@ typedef enum {
     SENSORS_PV_VY,
     SENSORS_PV_Z,
     SENSORS_PV_VZ,
+    SENSORS_PV_VOLTAGE,
+    SENSORS_PV_VOLTAGE_WARN,
+    SENSORS_PV_VOLTAGE_LOW,
     SENSORS_PV_MAX
 } sensors_pv_t;
 
@@ -116,17 +122,19 @@ typedef enum {
  *
  * gpio_num_t scl: I2C-Bus Clock-Pin
  * gpio_num_t sda: I2C-Bus Daten-Pin
- * uint8_t bnoAddr: BNO I2C Adresse
+ * uint8_t bnoAddress: BNO I2C Adresse
  * gpio_num_t bnoInterrupt: BNO Interrupt Pin (Data ready)
  * gpio_num_t bnoReset: BNO Reset Pin
  * gpio_num_t ultTrigger: Ultraschall Trigger Pin
  * gpio_num_t ultEcho: Ultraschall Echo Pin
  * gpio_num_t gpsRxPin: Host RX GPS TX Pin
  * gpio_num_t gpsTxPin: Host TX GPS RX Pin
+ * uint8_t inaAddress: INA I2C Adresse
  *
  * returns: false -> Erfolg, true -> Error
  */
 bool sensors_init(gpio_num_t scl, gpio_num_t sda,
-                  uint8_t bnoAddr, gpio_num_t bnoInterrupt, gpio_num_t bnoReset,
+                  uint8_t bnoAddress, gpio_num_t bnoInterrupt, gpio_num_t bnoReset,
                   gpio_num_t ultTrigger, gpio_num_t ultEcho,
-                  gpio_num_t gpsRxPin, gpio_num_t gpsTxPin);
+                  gpio_num_t gpsRxPin, gpio_num_t gpsTxPin,
+                  uint8_t inaAddress);
