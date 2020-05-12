@@ -87,7 +87,6 @@
 // - Sensors X rechnet noch nicht mit Geschwindigkeit vom GPS
 // - libesphttpd besser portieren
 // - gps ubx Prüfsumme wird nicht geprüft
-// - json empfang NULL-Terminierung
 // - sensor timeout
 // - rateUpdate von GPS und Ultarschall ungetestet
 
@@ -121,7 +120,7 @@ void app_main(void* arg) {
     ESP_LOGI("quadro2", "Status Sensorik: %s", ret ? "Error" : "Ok");
 
     ESP_LOGI("quadro2", "Starte Remote...");
-    ret = remote_init("OnePlus 5", "Testing1234");
+    ret = remote_init("OnePlus 8", "594cbd28ee05");
     ESP_LOGI("quadro2", "Status Remote: %s", ret ? "Error" : "Ok");
 
     ESP_LOGI("quadro2", "Starte Control...");

@@ -412,7 +412,7 @@ static void remote_pvForward(pv_t *pv) {
 }
 
 static void remote_messageProcess(char *message, size_t length) {
-    message[length] = '\0'; // Fixme!
+    message[length] = '\0'; // tiny-json erwartet Null-terminiterter String
     const json_t *j = json_create(message, remote.jsonBuffer, sizeof(remote.jsonBuffer) / sizeof(json_t));
     if (j && json_getType(j) == JSON_ARRAY) {
         const json_t *jType = json_getChild(j);
