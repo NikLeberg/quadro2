@@ -227,7 +227,7 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     // Spannungssensor INA initialisieren
     ESP_LOGD("sensors", "INA init");
     ret = ina_init(inaAddress, &sensors.rate.slow);
-    ESP_LOGD("sensors", "GPS %s", ret ? "error" : "ok");
+    ESP_LOGD("sensors", "INA %s", ret ? "error" : "ok");
     // Kalman Filter Z initialisieren
     EEKF_CALLOC_MATRIX(sensors.Z.x, 2, 1); // 2 States: Position, Geschwindigkeit
     EEKF_CALLOC_MATRIX(sensors.Z.P, 2, 2);

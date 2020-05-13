@@ -42,13 +42,11 @@
 /** Variablendeklaration **/
 
 #ifndef M_PI_2
-    #define M_PI_2 1.57079632679489661923
+    #define M_PI_2 1.57079632679489661923f
 #endif
 
 typedef struct {
-    struct {
-        int64_t timestamp;
-    };
+    int64_t timestamp;
 } bno_event_t;
 
 static struct {
@@ -65,7 +63,7 @@ static struct {
     event_t forward;
 } bno;
 
-QueueHandle_t xBno;
+static QueueHandle_t xBno;
 
 
 /** Private Functions **/

@@ -89,6 +89,7 @@
 // - gps ubx Prüfsumme wird nicht geprüft
 // - sensor timeout
 // - rateUpdate von GPS und Ultarschall ungetestet
+// - stack overflow in remote (nach längerer Zeit) / esphttpd (nach Website Refresh)
 
 typedef enum {
     MAIN_PV_TICKS,

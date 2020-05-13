@@ -62,7 +62,8 @@ bool ina_init(uint8_t address, uint32_t *rate) {
     // konfiguriere Sensor
     uint8_t config[] = {0x00, 0b00111001, 0b10011111}; // +-320 mV - 532 us - kontinuierlich
     if (i2c_write(address, config, sizeof(config))) return true;
-    if (i2c_write(address, 0x02, 1)) return true; // setze Registerpointer auf "Bus voltage"
+    uint8_t reg = 0x02;
+    if (i2c_write(address, &reg, 1)) return true; // setze Registerpointer auf "Bus voltage"
     // Task starten
     if (xTaskCreate(&ina_task, "ina", 1 * 1024, NULL, xSensors_PRIORITY - 1, NULL) != pdTRUE) return true;
     return false;
@@ -70,7 +71,6 @@ bool ina_init(uint8_t address, uint32_t *rate) {
 
 void ina_task(void* arg) {
     // Variablen
-    int64_t startTimestamp;
     TickType_t lastWakeTime = xTaskGetTickCount();
     uint8_t raw[2];
     // Loop
