@@ -281,7 +281,7 @@ static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t
         UART[GPS_UART]->int_ena.rxfifo_tout = 1;
         UART[GPS_UART]->int_ena.rxfifo_full = 1;
         if (xSemaphoreTake(gps.rxSemphr, timeout) == pdFALSE) continue;
-        uint8_t c, position = 0;
+        uint8_t c, position = 0, ckA, ckB;
         while (UART[GPS_UART]->status.rxfifo_cnt) {
             c = UART[GPS_UART]->fifo.rw_byte;
             switch (position) {
@@ -312,7 +312,21 @@ static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t
                     if (position - 6 < length) {
                         payload[position - 6] = c;
                         ++position;
-                    } else return false; // komplettes Frame empfangen, ckA & ckB sind noch im Buffer, nächster Aufruf kümmert sich drum
+                    } else { // Prüfsumme nachrechnen
+                        ckA = length & 0x00ff;
+                        ckB = length & 0x00ff;
+                        ckA += length >> 8;
+                        ckB += ckA;
+                        for (uint16_t i = 0; i < length; ++i) {
+                            ckA += payload[i];
+                            ckB += ckA;
+                        }
+                        if (ckA != UART[GPS_UART]->fifo.rw_byte
+                         || ckB != UART[GPS_UART]->fifo.rw_byte) {
+                            ESP_LOGD("gps", "Prüfsummenfehler"); // ToDo: Test & Hardfail
+                        };
+                        return false; // komplettes Frame empfangen
+                    }
                     break;
             }
         }
@@ -388,6 +402,5 @@ static void gps_uartRxFifoReset() {
     while (uart->status.rxfifo_cnt) {
         (volatile void) uart->fifo.rw_byte;
     }
-    //uart->conf0.rxfifo_rst = 1;
     return;
 }

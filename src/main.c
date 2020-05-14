@@ -86,7 +86,7 @@
 // Bugs:
 // - Sensors X rechnet noch nicht mit Geschwindigkeit vom GPS
 // - libesphttpd besser portieren
-// - gps ubx Prüfsumme wird nicht geprüft
+// - gps ubx Prüfsumme wird nicht geprüft -> muss getestet werden
 // - sensor timeout
 // - rateUpdate von GPS und Ultarschall ungetestet
 // - stack overflow in remote (nach längerer Zeit) / esphttpd (nach Website Refresh)
