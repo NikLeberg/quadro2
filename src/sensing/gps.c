@@ -204,7 +204,7 @@ void gps_task(void* arg) {
         // Fix-Typ & Satelitenanzahl
         uint8_t fixType = nav[20];
         // uint8_t satNum = nav[23];
-        // if (fixType == 0 || fixType == 5) continue; // noch kein Fix oder nur Zeit-Fix
+        if (fixType == 0 || fixType == 5) continue; // noch kein Fix oder nur Zeit-Fix
         // Position als y = Longitude / x = Latitude / z = Altitude
         // Laitude - Quer / Logitude - oben nach unten
         v.y = (int32_t) ((nav[27] << 24) | (nav[26] << 16) | (nav[25] << 8) | (nav[24])) * 1e-7; // °
@@ -234,7 +234,7 @@ void gps_updateRate(uint32_t rate) {
     // UBX-CFG-RATE: Daten-Rate setzen
     uint8_t msgRate[] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, (0xff & rate),
                         (rate >> 8), 0x01, 0x00, 0x00, 0x00, NULL, NULL};
-    bool result = gps_sendUBX(msgRate, sizeof(msgRate), true, 100 / portTICK_PERIOD_MS);
+    bool result = gps_sendUBX(msgRate, sizeof(msgRate), false, 0); // kein NAK Empfang, sonst kriegt GPS-Task Probleme aus irgend einem Grund (semphr?)
     ESP_LOGD("gps", "update rate: %u", result);
 }
 
@@ -281,52 +281,32 @@ static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t
         UART[GPS_UART]->int_ena.rxfifo_tout = 1;
         UART[GPS_UART]->int_ena.rxfifo_full = 1;
         if (xSemaphoreTake(gps.rxSemphr, timeout) == pdFALSE) continue;
-        uint8_t c, position = 0, ckA, ckB;
+        uint8_t c, position = 0;
         while (UART[GPS_UART]->status.rxfifo_cnt) {
             c = UART[GPS_UART]->fifo.rw_byte;
+            ++position;
             switch (position) {
-                case (0): // Sync 1
-                    if (c == 0xb5) position = 1;
+                case (1): // Sync 1
+                    if (c != 0xb5) position = 0;
                     break;
-                case (1): // Sync 2
-                    if (c == 0x62) position = 2;
-                    else position = 0;
+                case (2): // Sync 2
+                    if (c != 0x62) position = 0;
                     break;
-                case (2): // Class
-                    if (c == class) position = 3;
-                    else position = 0;
+                case (3): // Class
+                    if (c != class) position = 0;
                     break;
-                case (3): // ID
-                    if (c == id) position = 4;
-                    else position = 0;
+                case (4): // ID
+                    if (c != id) position = 0;
                     break;
-                case (4): // Size LSB
-                    if (c == (length & 0x00ff)) position = 5;
-                    else position = 0;
+                case (5): // Size LSB
+                    if (c != (length & 0x00ff)) position = 0;
                     break;
-                case (5): // Size MSB
-                    if (c == (length >> 8)) position = 6;
-                    else position = 0;
+                case (6): // Size MSB
+                    if (c != (length >> 8)) position = 0;
                     break;
                 default: // Payload
-                    if (position - 6 < length) {
-                        payload[position - 6] = c;
-                        ++position;
-                    } else { // Prüfsumme nachrechnen
-                        ckA = length & 0x00ff;
-                        ckB = length & 0x00ff;
-                        ckA += length >> 8;
-                        ckB += ckA;
-                        for (uint16_t i = 0; i < length; ++i) {
-                            ckA += payload[i];
-                            ckB += ckA;
-                        }
-                        if (ckA != UART[GPS_UART]->fifo.rw_byte
-                         || ckB != UART[GPS_UART]->fifo.rw_byte) {
-                            ESP_LOGD("gps", "Prüfsummenfehler"); // ToDo: Test & Hardfail
-                        };
-                        return false; // komplettes Frame empfangen
-                    }
+                    if (position - 7 < length) payload[position - 7] = c;
+                    else return false; // Frame empfangen (ohne Prüfsummencheck)
                     break;
             }
         }

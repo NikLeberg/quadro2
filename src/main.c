@@ -86,9 +86,9 @@
 // Bugs:
 // - Sensors X rechnet noch nicht mit Geschwindigkeit vom GPS
 // - libesphttpd besser portieren
-// - gps ubx Prüfsumme wird nicht geprüft -> muss getestet werden
+// - gps ubx Prüfsumme wird nicht geprüft
 // - sensor timeout
-// - rateUpdate von GPS und Ultarschall ungetestet
+// - rateUpdate von Ultraschall ungetestet
 // - stack overflow in remote (nach längerer Zeit) / esphttpd (nach Website Refresh)
 
 typedef enum {
