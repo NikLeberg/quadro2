@@ -13,6 +13,10 @@ def main():
     x = [0.0]
     y = [0.0]
     K = [0.0]
+    FL = [0.0]
+    FR = [0.0]
+    HL = [0.0]
+    HR = [0.0]
     with open(str(sys.argv[1])) as csvfile:
         readCSV = csv.reader(csvfile, delimiter=';')
         rows = iter(readCSV)
@@ -24,6 +28,10 @@ def main():
         headPitch = row[4]
         headX = row[5]
         headY = row[6]
+        headFL = row[7]
+        headFR = row[8]
+        headHL = row[9]
+        headHR = row[10]
         row = next(rows)
         lastTimestamp = float(row[0])
         # über Zeilen iterieren
@@ -42,8 +50,10 @@ def main():
                     pitch.append(pitch[-1])
                     x.append(x[-1])
                     y.append(y[-1])
-                    #if (armed[-1] > 0.0): K.append(K[-1])
-                    #else: K.append(0.0)
+                    FL.append(FL[-1])
+                    FR.append(FR[-1])
+                    HL.append(HL[-1])
+                    HR.append(HR[-1])
                 if (len(row) > 2 and row[2] != ''):
                     armed.append(armed[-1])
                     throttle.append(float(row[2]))
@@ -51,7 +61,10 @@ def main():
                     pitch.append(pitch[-1])
                     x.append(x[-1])
                     y.append(y[-1])
-                    #K.append(K[-1])
+                    FL.append(FL[-1])
+                    FR.append(FR[-1])
+                    HL.append(HL[-1])
+                    HR.append(HR[-1])
                 if (len(row) > 3 and row[3] != ''):
                     armed.append(armed[-1])
                     throttle.append(throttle[-1])
@@ -59,11 +72,10 @@ def main():
                     pitch.append(pitch[-1])
                     x.append(x[-1])
                     y.append(y[-1])
-                    #if (armed[-1] > 0.0):
-                    #    K.append((K[-1] + (roll[-1]) / x[-1]) / 2.0)
-                    #    print("K:", K[-1], "Ist:", roll[-1], "Out:", x[-1])
-                    #else:
-                    #    K.append(0.0)
+                    FL.append(FL[-1])
+                    FR.append(FR[-1])
+                    HL.append(HL[-1])
+                    HR.append(HR[-1])
                 if (len(row) > 4 and row[4] != ''):
                     armed.append(armed[-1])
                     throttle.append(throttle[-1])
@@ -71,7 +83,10 @@ def main():
                     pitch.append(float(row[4]))
                     x.append(x[-1])
                     y.append(y[-1])
-                    #K.append(K[-1])
+                    FL.append(FL[-1])
+                    FR.append(FR[-1])
+                    HL.append(HL[-1])
+                    HR.append(HR[-1])
                 if (len(row) > 5 and row[5] != ''):
                     armed.append(armed[-1])
                     throttle.append(throttle[-1])
@@ -79,7 +94,10 @@ def main():
                     pitch.append(pitch[-1])
                     x.append(float(row[5]))
                     y.append(y[-1])
-                    #K.append(K[-1])
+                    FL.append(FL[-1])
+                    FR.append(FR[-1])
+                    HL.append(HL[-1])
+                    HR.append(HR[-1])
                 if (len(row) > 6 and row[6] != ''):
                     armed.append(armed[-1])
                     throttle.append(throttle[-1])
@@ -87,7 +105,54 @@ def main():
                     pitch.append(pitch[-1])
                     x.append(x[-1])
                     y.append(float(row[6]))
-                    #K.append(K[-1])
+                    FL.append(FL[-1])
+                    FR.append(FR[-1])
+                    HL.append(HL[-1])
+                    HR.append(HR[-1])
+                if (len(row) > 7 and row[7] != ''):
+                    armed.append(armed[-1])
+                    throttle.append(throttle[-1])
+                    roll.append(roll[-1])
+                    pitch.append(pitch[-1])
+                    x.append(x[-1])
+                    y.append(y[-1])
+                    FL.append(float(row[7]))
+                    FR.append(FR[-1])
+                    HL.append(HL[-1])
+                    HR.append(HR[-1])
+                if (len(row) > 8 and row[8] != ''):
+                    armed.append(armed[-1])
+                    throttle.append(throttle[-1])
+                    roll.append(roll[-1])
+                    pitch.append(pitch[-1])
+                    x.append(x[-1])
+                    y.append(y[-1])
+                    FL.append(FL[-1])
+                    FR.append(float(row[8]))
+                    HL.append(HL[-1])
+                    HR.append(HR[-1])
+                if (len(row) > 9 and row[9] != ''):
+                    armed.append(armed[-1])
+                    throttle.append(throttle[-1])
+                    roll.append(roll[-1])
+                    pitch.append(pitch[-1])
+                    x.append(x[-1])
+                    y.append(y[-1])
+                    FL.append(FL[-1])
+                    FR.append(FR[-1])
+                    HL.append(float(row[9]))
+                    HR.append(HR[-1])
+                if (len(row) > 10 and row[10] != ''):
+                    armed.append(armed[-1])
+                    throttle.append(throttle[-1])
+                    roll.append(roll[-1])
+                    pitch.append(pitch[-1])
+                    x.append(x[-1])
+                    y.append(y[-1])
+                    FL.append(FL[-1])
+                    FR.append(FR[-1])
+                    HL.append(HL[-1])
+                    HR.append(float(row[10]))
                 # speichere für Plot
                 time.append(time[-1] + dT)
 
@@ -103,6 +168,10 @@ def main():
         plt.plot(time, pitch, label=headPitch)
         plt.plot(time, x, label=headX)
         plt.plot(time, y, label=headY)
+        plt.plot(time, FL, label=headFL)
+        plt.plot(time, FR, label=headFR)
+        plt.plot(time, HL, label=headHL)
+        plt.plot(time, HR, label=headHR)
         #plt.plot(time, K, label="K")
         plt.legend()
         plt.show()
