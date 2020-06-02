@@ -75,8 +75,7 @@ typedef enum {
 struct control_t {
     bool armed;
     float throttle;
-
-    float throttleOverride;
+    bool throttleBoost;
 
     float maxRollPitch;
 
@@ -119,6 +118,8 @@ static setting_t control_settings[CONTROL_SETTING_MAX] = {
     SETTING("zStabilizeKi",     &control.pids.stabilize[AXIS_HEADING].Ki,   VALUE_TYPE_FLOAT),
     SETTING("zStabilizeKd",     &control.pids.stabilize[AXIS_HEADING].Kd,   VALUE_TYPE_FLOAT),
     SETTING("zStabilizeBand",   &control.pids.stabilize[AXIS_HEADING].band, VALUE_TYPE_FLOAT),
+
+    SETTING("throttleBoost",    &control.throttleBoost,                     VALUE_TYPE_UINT)
 };
 static SETTING_LIST("control", control_settings, CONTROL_SETTING_MAX);
 
@@ -133,8 +134,7 @@ static parameter_t control_parameters[CONTROL_PARAMETER_MAX] = {
     PARAMETER("vz",             &control.setpoints.velocity.z,  VALUE_TYPE_FLOAT),
     PARAMETER("x",              &control.setpoints.position.x,  VALUE_TYPE_FLOAT),
     PARAMETER("y",              &control.setpoints.position.y,  VALUE_TYPE_FLOAT),
-    PARAMETER("z",              &control.setpoints.position.z,  VALUE_TYPE_FLOAT),
-    PARAMETER("override",       &control.throttleOverride,      VALUE_TYPE_FLOAT)
+    PARAMETER("z",              &control.setpoints.position.z,  VALUE_TYPE_FLOAT)
 };
 static PARAMETER_LIST("control", control_parameters, CONTROL_PARAMETER_MAX);
 
@@ -145,6 +145,7 @@ static pv_t control_pvs[CONTROL_PV_MAX] = {
     PV("backLeft",      VALUE_TYPE_FLOAT),
     PV("backRight",     VALUE_TYPE_FLOAT),
     PV("maxThrottle",   VALUE_TYPE_NONE),
+    PV("minThrottle",   VALUE_TYPE_NONE),
     PV("roll",          VALUE_TYPE_FLOAT),
     PV("pitch",         VALUE_TYPE_FLOAT),
     PV("heading",       VALUE_TYPE_FLOAT),
@@ -222,9 +223,9 @@ static void control_motorsThrottle(float throttle[4]);
  * ----------------------------
  * Erhöht geforderter Throttle sodass ein äquivalenter Schub wie bei voller Batterie resultiert.
  *
- * float *throttle: Throttle der geboosted werden soll
+ * float throttle[4]: Throttle der geboosted werden soll
  */
-static void control_motorsBoost(float *throttle);
+static void control_motorsBoost(float throttle[4]);
 
 
 /** Implementierung **/
@@ -437,44 +438,64 @@ static void control_stabilize() {
     }
     // rechne pids
     TickType_t tick = xTaskGetTickCount();
-    vector_t gain; // - 1.0 bis + 1.0
+    vector_t gain;
     for (control_axes_t i = 0; i < 3; ++i) { // roll, pitch, heading
         gain.v[i] = control_pidCalculate(&control.pids.stabilize[i], control.setpoints.euler.v[i], euler.v[i], tick);
         pvPublishFloat(xControl, CONTROL_PV_OUT_X + i, gain.v[i]);
     }
-    // throttle rechnen
+    // throttle mixen
     float throttles[MOTOR_MAX];
     throttles[MOTOR_FRONT_LEFT] =   gain.x - gain.y + gain.z;
     throttles[MOTOR_FRONT_RIGHT] = -gain.x - gain.y - gain.z;
     throttles[MOTOR_BACK_LEFT]  =   gain.x + gain.y - gain.z;
     throttles[MOTOR_BACK_RIGHT] =  -gain.x + gain.y + gain.z;
+    // nach oben beschränken (remanent auf throttle wirkend) wenn auf einem Motor > 1.0 verlangt wäre
     for (control_motors_t i = 0 ; i < MOTOR_MAX; ++i) {
-        if (throttles[i] + control.throttle > 1.0f) {
-            control.throttle = 1.0f - throttles[i];
+        if (throttles[i] * control.throttle + control.throttle > 1.0f) {
+            control.throttle = 1.0f / (throttles[i] + 1.0f);
             pvPublish(xControl, CONTROL_PV_THROTTLE_MAX);
         }
     }
     for (control_motors_t i = 0 ; i < MOTOR_MAX; ++i) {
+        throttles[i] *= control.throttle;
         throttles[i] += control.throttle;
     }
+    // tiefer throttle heben (nur temporär auf throttle wirkend) wenn auf einem Motor < 0.0 verlangt wäre
+    if (control.throttleBoost) {
+        float negThrottle = 0.0f;
+        for (control_motors_t i = 0 ; i < MOTOR_MAX; ++i) {
+            if (throttles[i] < 0.0f && throttles[i] < negThrottle) {
+                negThrottle = throttles[i];
+                pvPublish(xControl, CONTROL_PV_THROTTLE_MIN);
+            }
+        }
+        for (control_motors_t i = 0 ; i < MOTOR_MAX; ++i) {
+            throttles[i] += -negThrottle;
+        }
+    } // https://docs.px4.io/v1.9.0/en/config_mc/pid_tuning_guide_multicopter.html
     control_motorsThrottle(throttles);
 }
 
 static void control_motorsThrottle(float throttle[4]) {
-    uint32_t duty;
-    for (control_motors_t i = 0; i < MOTOR_MAX; ++i) {
-        if (control.throttleOverride) throttle[i] = control.throttleOverride; // DEBUG
-        control_motorsBoost(&throttle[i]);
-        if (!control.armed) throttle[i] = 0.0f;
-        if (throttle[i] > 1.0f) throttle[i] = 1.0f;
-        else if (throttle[i] < 0.0f) throttle[i] = 0.0f;
-        duty = throttle[i] * (CONTROL_MOTOR_DUTY_MAX - CONTROL_MOTOR_DUTY_MIN) + CONTROL_MOTOR_DUTY_MIN;
-        ledc_set_duty(LEDC_HIGH_SPEED_MODE, i, duty);
-        ledc_update_duty(LEDC_HIGH_SPEED_MODE, i);
-        pvPublishFloat(xControl, CONTROL_PV_THROTTLE_FRONT_LEFT + i, throttle[i]);
+    if (control.armed) {
+        uint32_t duty;
+        for (control_motors_t i = 0; i < MOTOR_MAX; ++i) {
+            control_motorsBoost(&throttle[i]);
+            if (throttle[i] > 1.0f) throttle[i] = 1.0f;
+            else if (throttle[i] < 0.0f) throttle[i] = 0.0f;
+            duty = throttle[i] * (CONTROL_MOTOR_DUTY_MAX - CONTROL_MOTOR_DUTY_MIN_ON) + CONTROL_MOTOR_DUTY_MIN_ON;
+            ledc_set_duty(LEDC_HIGH_SPEED_MODE, i, duty);
+            ledc_update_duty(LEDC_HIGH_SPEED_MODE, i);
+            pvPublishFloat(xControl, CONTROL_PV_THROTTLE_FRONT_LEFT + i, throttle[i]);
+        }
+    } else {
+        for (control_motors_t i = 0; i < MOTOR_MAX; ++i) {
+            ledc_stop(LEDC_HIGH_SPEED_MODE, i, 0);
+            pvPublishFloat(xControl, CONTROL_PV_THROTTLE_FRONT_LEFT + i, 0);
+        }
     }
 }
 
-static void control_motorsBoost(float *throttle) {
+static void control_motorsBoost(float throttle[4]) {
     ;
 }
