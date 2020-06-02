@@ -273,14 +273,15 @@ void bno_toEuler(vector_t *euler, orientation_t *quaternion) {
 }
 
 static bool bno_sensorEnable(sh2_SensorId_t sensorId, uint32_t interval_us) {
-    sh2_SensorConfig_t config;
-    config.changeSensitivityEnabled = false;
-    config.wakeupEnabled = false;
-    config.changeSensitivityRelative = false;
-    config.alwaysOnEnabled = false;
-    config.changeSensitivity = 0;
-    config.reportInterval_us = interval_us;
-    config.batchInterval_us = 0;
+    sh2_SensorConfig_t config = {
+        changeSensitivityEnabled : false,
+        wakeupEnabled : false,
+        changeSensitivityRelative : false,
+        alwaysOnEnabled : true,
+        changeSensitivity : 0,
+        reportInterval_us : interval_us,
+        batchInterval_us: 0
+    };
     if (sh2_setSensorConfig(sensorId, &config)) return true;
     return false;
 }
