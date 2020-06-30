@@ -444,7 +444,8 @@ static void control_stabilize() {
         pvPublishFloat(xControl, CONTROL_PV_OUT_X + i, gain.v[i]);
     }
     // throttle mixen
-    float throttles[MOTOR_MAX];
+    gain.y /= 0.775f; // Korrektur für wide-X Frame gemäss https://www.iforce2d.net/mixercalc/
+    float throttles[MOTOR_MAX]; //  roll     pitch    heading
     throttles[MOTOR_FRONT_LEFT] =   gain.x - gain.y + gain.z;
     throttles[MOTOR_FRONT_RIGHT] = -gain.x - gain.y - gain.z;
     throttles[MOTOR_BACK_LEFT]  =   gain.x + gain.y - gain.z;
@@ -460,7 +461,7 @@ static void control_stabilize() {
         throttles[i] *= control.throttle;
         throttles[i] += control.throttle;
     }
-    // tiefer throttle heben (nur temporär auf throttle wirkend) wenn auf einem Motor < 0.0 verlangt wäre
+    // tiefen throttle heben (nur temporär auf throttle wirkend) wenn auf einem Motor < 0.0 verlangt wäre
     if (control.throttleBoost) {
         float negThrottle = 0.0f;
         for (control_motors_t i = 0 ; i < MOTOR_MAX; ++i) {
@@ -477,22 +478,19 @@ static void control_stabilize() {
 }
 
 static void control_motorsThrottle(float throttle[4]) {
-    if (control.armed) {
-        uint32_t duty;
-        for (control_motors_t i = 0; i < MOTOR_MAX; ++i) {
-            control_motorsBoost(&throttle[i]);
-            if (throttle[i] > 1.0f) throttle[i] = 1.0f;
-            else if (throttle[i] < 0.0f) throttle[i] = 0.0f;
-            duty = throttle[i] * (CONTROL_MOTOR_DUTY_MAX - CONTROL_MOTOR_DUTY_MIN_ON) + CONTROL_MOTOR_DUTY_MIN_ON;
-            ledc_set_duty(LEDC_HIGH_SPEED_MODE, i, duty);
-            ledc_update_duty(LEDC_HIGH_SPEED_MODE, i);
-            pvPublishFloat(xControl, CONTROL_PV_THROTTLE_FRONT_LEFT + i, throttle[i]);
+    uint32_t duty;
+    for (control_motors_t i = 0; i < MOTOR_MAX; ++i) {
+        control_motorsBoost(&throttle[i]);
+        if (throttle[i] > 1.0f) throttle[i] = 1.0f;
+        else if (throttle[i] < 0.0f) throttle[i] = 0.0f;
+        if (control.armed) {
+            duty = throttle[i] * (CONTROL_MOTOR_DUTY_MAX - CONTROL_MOTOR_DUTY_MIN_SPIN) + CONTROL_MOTOR_DUTY_MIN_SPIN;
+        } else {
+            duty = CONTROL_MOTOR_DUTY_MIN;
         }
-    } else {
-        for (control_motors_t i = 0; i < MOTOR_MAX; ++i) {
-            ledc_stop(LEDC_HIGH_SPEED_MODE, i, 0);
-            pvPublishFloat(xControl, CONTROL_PV_THROTTLE_FRONT_LEFT + i, 0);
-        }
+        ledc_set_duty(LEDC_HIGH_SPEED_MODE, i, duty);
+        ledc_update_duty(LEDC_HIGH_SPEED_MODE, i);
+        pvPublishFloat(xControl, CONTROL_PV_THROTTLE_FRONT_LEFT + i, throttle[i]);
     }
 }
 
