@@ -69,15 +69,15 @@
 #include "info/info.h"
 
 // Pins
-#define I2C_SCL             GPIO_NUM_25
-#define I2C_SDA             GPIO_NUM_33
-#define BNO_INTERRUPT       GPIO_NUM_35
-#define BNO_RESET           GPIO_NUM_32
+#define I2C_SCL             GPIO_NUM_5
+#define I2C_SDA             GPIO_NUM_17
+#define BNO_INTERRUPT       GPIO_NUM_23
+#define BNO_RESET           GPIO_NUM_22
 #define ULTRASONIC_TRIGGER  GPIO_NUM_26 // über Wiederstand-Spannungsteiler
 #define ULTRASONIC_ECHO     GPIO_NUM_27
-#define GPS_RX_HOST_TX      GPIO_NUM_17 // über 100 Ohm Wiederstand
-#define GPS_TX_HOST_RX      GPIO_NUM_16
-#define LED_I2C             GPIO_NUM_22
+#define GPS_RX_HOST_TX      GPIO_NUM_21 // über 100 Ohm Wiederstand
+#define GPS_TX_HOST_RX      GPIO_NUM_19
+//#define LED_I2C             GPIO_NUM_22
 #define MOTOR_FRONT_LEFT    GPIO_NUM_4
 #define MOTOR_FRONT_RIGHT   GPIO_NUM_0
 #define MOTOR_BACK_LEFT     GPIO_NUM_2
@@ -114,7 +114,7 @@ void app_main(void* arg) {
     bool ret = false;
     ESP_LOGI("quadro2", "Starte Sensorik...");
     ret = sensors_init(I2C_SCL, I2C_SDA,
-                       0x4A, BNO_INTERRUPT, BNO_RESET,
+                       0x4B, BNO_INTERRUPT, BNO_RESET,
                        ULTRASONIC_TRIGGER, ULTRASONIC_ECHO,
                        GPS_TX_HOST_RX, GPS_RX_HOST_TX,
                        0x40);
@@ -141,11 +141,5 @@ void app_main(void* arg) {
         vTaskDelay(2000 / portTICK_PERIOD_MS);
         currentTick = xTaskGetTickCount() * portTICK_PERIOD_MS;
         pvPublishUint((QueueHandle_t)1, MAIN_PV_TICKS, currentTick);
-        // Stats
-        // ESP_LOGD("stats", "Queue Load:");
-        // ESP_LOGD("sensors", "%d von 16", uxQueueMessagesWaiting(xSensors));
-        // ESP_LOGD("bno", "%d von 4", uxQueueMessagesWaiting(xBno));
-        // ESP_LOGD("remote", "%d von 32", uxQueueMessagesWaiting(xRemote));
-        // ESP_LOGD("control", "%d von 16", uxQueueMessagesWaiting(xControl));
     }
 }
