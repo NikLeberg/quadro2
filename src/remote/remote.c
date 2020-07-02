@@ -56,6 +56,8 @@ struct remote_t {
 
     esp_log_level_t logLevel;
     vprintf_like_t defaultLog;
+
+    uint32_t pvRate;
 } remote;
 
 static command_t remote_commands[REMOTE_COMMAND_MAX] = {
@@ -64,7 +66,8 @@ static command_t remote_commands[REMOTE_COMMAND_MAX] = {
 static COMMAND_LIST("remote", remote_commands, REMOTE_COMMAND_MAX);
 
 static setting_t remote_settings[REMOTE_SETTING_MAX] = {
-    SETTING("logLevel", &remote.logLevel, VALUE_TYPE_UINT)
+    SETTING("logLevel", &remote.logLevel,   VALUE_TYPE_UINT),
+    SETTING("pvRate",   &remote.pvRate,     VALUE_TYPE_UINT)
 };
 static SETTING_LIST("remote", remote_settings, REMOTE_SETTING_MAX);
 
@@ -301,7 +304,7 @@ void remote_task(void* arg) {
     event_t event;
     // Loop
     while (true) {
-        if (xQueueReceive(xRemote, &event, 500 / portTICK_RATE_MS) == pdTRUE) {
+        if (xQueueReceive(xRemote, &event, 50 / portTICK_RATE_MS) == pdTRUE) {
             switch (event.type) {
                 case (EVENT_COMMAND): {
                     xQueueReset(xRemote);
@@ -346,6 +349,7 @@ static esp_err_t remote_connectionEventHandler(void *ctx, system_event_t *event)
         }
         case SYSTEM_EVENT_STA_DISCONNECTED:
             // Verbindung wiederherstellen, wenn nicht absichtlich
+            // ToDo: Logik fixen
             switch(event->event_info.disconnected.reason) {
                 case (WIFI_REASON_AUTH_EXPIRE):
                 case (WIFI_REASON_AUTH_FAIL):
@@ -445,7 +449,7 @@ static void remote_messageProcess(char *message, size_t length) {
                         const json_t *jPv = (jPublisher) ? json_getSibling(jPublisher) : NULL;
                         if (jPv && json_getType(jPublisher) == JSON_INTEGER && json_getType(jPv) == JSON_INTEGER) { // valid
                             pv_t *pv;
-                            pv = intercom_pvSubscribe2(xRemote, json_getInteger(jPublisher), json_getInteger(jPv), 100 / portTICK_PERIOD_MS);
+                            pv = intercom_pvSubscribe2(xRemote, json_getInteger(jPublisher), json_getInteger(jPv), remote.pvRate / portTICK_PERIOD_MS);
                             if (pv && pv->type != VALUE_TYPE_NONE) remote_pvForward(pv); // zuletzt bekannter Zustand schicken
                         }
                     }
@@ -641,7 +645,7 @@ int remote_printLog(const char * format, va_list arguments) {
         bool shouldForward = false;
         switch (format[0]) {
             case ('E'):
-                shouldForward = true;
+                shouldForward = (remote.logLevel >= ESP_LOG_ERROR);
                 break;
             case ('W'):
                 shouldForward = (remote.logLevel >= ESP_LOG_WARN);
@@ -654,9 +658,6 @@ int remote_printLog(const char * format, va_list arguments) {
                 break;
             case ('V'):
                 shouldForward = (remote.logLevel == ESP_LOG_VERBOSE);
-                break;
-            default:
-                shouldForward = false;
                 break;
         }
         if (shouldForward) {

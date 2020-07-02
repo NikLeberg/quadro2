@@ -41,6 +41,7 @@ typedef enum {
 
 typedef enum {
     REMOTE_SETTING_LOGLEVEL = 0,
+    REMOTE_SETTING_PV_RATE = 1,
     REMOTE_SETTING_MAX
 } remote_setting_t;
 
