@@ -280,7 +280,7 @@ static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t
         }
         UART[GPS_UART]->int_ena.rxfifo_tout = 1;
         UART[GPS_UART]->int_ena.rxfifo_full = 1;
-        if (xSemaphoreTake(gps.rxSemphr, timeout) == pdFALSE) continue;
+        if (xSemaphoreTake(gps.rxSemphr, timeout) == pdFALSE) break;
         uint8_t c, position = 0;
         while (UART[GPS_UART]->status.rxfifo_cnt) {
             c = UART[GPS_UART]->fifo.rw_byte;
