@@ -73,8 +73,8 @@
 #define I2C_SDA             GPIO_NUM_17
 #define BNO_INTERRUPT       GPIO_NUM_23
 #define BNO_RESET           GPIO_NUM_22
-#define ULTRASONIC_TRIGGER  GPIO_NUM_26 // über Wiederstand-Spannungsteiler
-#define ULTRASONIC_ECHO     GPIO_NUM_27
+#define ULTRASONIC_TRIGGER  GPIO_NUM_18
+#define ULTRASONIC_ECHO     GPIO_NUM_16 // über Wiederstand-Spannungsteiler (5V -> 3.3V)
 #define GPS_RX_HOST_TX      GPIO_NUM_21 // über 100 Ohm Wiederstand
 #define GPS_TX_HOST_RX      GPIO_NUM_19
 //#define LED_I2C             GPIO_NUM_22
