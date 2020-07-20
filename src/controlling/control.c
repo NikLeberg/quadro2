@@ -307,7 +307,7 @@ void control_task(void* arg) {
                     ESP_LOGD("control", "got state");
                     control_processCommand(CONTROL_COMMAND_DISARM);
                 } else if (pv == pvSensorsTimeout) {
-                    if (pvGetUint(pv) == SENSORS_ORIENTATION) {
+                    if (pvGetUint(pv) & (0x1 << SENSORS_ORIENTATION)) {
                         ESP_LOGD("control", "got sens timeout");
                         control_processCommand(CONTROL_COMMAND_DISARM);
                     }

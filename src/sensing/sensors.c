@@ -66,7 +66,8 @@
 /** Variablendeklaration **/
 
 struct sensors_t {
-    uint32_t timeout; // in us;
+    uint32_t timeout; // in us
+    uint32_t timedOut; // Bitfeld der inaktiven Sensoren, Bits gem. sensors_event_type_t
 
     struct {
         uint32_t fast;   // schnelle Sensorik: Orientierung
@@ -180,6 +181,8 @@ void sensors_task(void* arg);
 static void sensors_processCommand(sensors_command_t command);
 static void sensors_processData(sensors_event_t *event);
 static void sensors_detectTimeout(int64_t timestamp);
+static inline void sensors_resetTimeout(sensors_event_type_t sensor);
+static inline void sensors_setTimeout(sensors_event_type_t sensor);
 static void sensors_fuseZ_reset();
 static void sensors_fuseZ(sensors_event_type_t type, float z, int64_t timestamp);
 eekf_return sensors_fuseZ_transition(eekf_mat* xp, eekf_mat* Jf, eekf_mat const *x, eekf_mat const *u, void* userData);
@@ -218,7 +221,7 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     ESP_LOGD("sensors", "BNO %s", ret ? "error" : "ok");
     // Ultraschall initialisieren
     ESP_LOGD("sensors", "ULT init");
-    ret = ult_init(ultTrigger, ultEcho, &sensors.rate.slow);
+    ret = ult_init(ultTrigger, ultEcho, &sensors.rate.medium);
     ESP_LOGD("sensors", "ULT %s", ret ? "error" : "ok");
     // GPS initialisieren
     ESP_LOGD("sensors", "GPS init");
@@ -335,11 +338,11 @@ static void sensors_processData(sensors_event_t *event) {
             pvPublish(xSensors, SENSORS_PV_ORIENTATION);
             break;
         case (SENSORS_ALTIMETER):
-            // ESP_LOGI("sensors", "%llu,B,%f,%f", event->timestamp, event->vector.z, event->accuracy);
+            ESP_LOGI("sensors", "%llu,B,%f,%f", event->timestamp, event->vector.z, event->accuracy);
             sensors_fuseZ(event->type, event->vector.z - sensors.homes.altitude, event->timestamp);
             break;
         case (SENSORS_ULTRASONIC):
-            // ESP_LOGI("sensors", "%llu,U,%f", event->timestamp, event->vector.z);
+            ESP_LOGI("sensors", "%llu,U,%f", event->timestamp, event->vector.z);
             sensors_fuseZ(event->type, event->vector.z - sensors.homes.distance, event->timestamp);
             break;
         case (SENSORS_POSITION):
@@ -365,18 +368,29 @@ static void sensors_processData(sensors_event_t *event) {
         default:
             break;
     }
-    sensors_detectTimeout(event->timestamp); // funktioniert solange mindestens ein Sensor Daten schickt 
+    uint32_t timedOut = sensors.timedOut;
+    sensors_resetTimeout(event->type); // Timeout des aktuellen Sensors zurücksetzen
+    sensors_detectTimeout(event->timestamp); // Timeout der anderen Sensoren erkennen
+    // bei Änderung ob neuerdings offline oder online, melden
+    if (timedOut != sensors.timedOut) pvPublishUint(xSensors, SENSORS_PV_TIMEOUT, sensors.timedOut);
 }
 
 static void sensors_detectTimeout(int64_t timestamp) {
     for (sensors_event_type_t i = 0; i < SENSORS_MAX; ++i) {
         if (sensors.states[i] && ((timestamp - sensors.states[i]->timestamp) > sensors.timeout)) {
-            pvPublishUint(xSensors, SENSORS_PV_TIMEOUT, i);
+            sensors_setTimeout(i);
             sensors.states[i]->timestamp = timestamp;
         }
     }
 }
 
+static inline void sensors_resetTimeout(sensors_event_type_t sensor) {
+    sensors.timedOut ^= (0x1 << sensor); 
+}
+
+static inline void sensors_setTimeout(sensors_event_type_t sensor) {
+    sensors.timedOut |= (0x1 << sensor); 
+}
 
 /* Z Altitute Fusion */
 

@@ -40,6 +40,7 @@
 /** Externe Abhängigkeiten **/
 
 #include "esp_system.h"
+#include "freertos/queue.h"
 
 
 /** Interne Abhängigkeiten **/
