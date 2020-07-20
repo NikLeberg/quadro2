@@ -27,6 +27,8 @@ typedef enum {
     SENSORS_POSITION, // GPS Fix lat/lon/alt
     SENSORS_GROUNDSPEED, // m/s
     SENSORS_VOLTAGE, // V
+    SENSORS_OPTICAL_FLOW, // rad/s
+    SENSORS_RANGE, // m
     SENSORS_MAX
 } sensors_event_type_t;
 
