@@ -22,13 +22,13 @@
 typedef enum {
     SENSORS_ACCELERATION, // m/s^2
     SENSORS_ORIENTATION, // Quaternion
+    SENSORS_ROTATION, // rad/s
     SENSORS_ALTIMETER, // umgerechneter Druck Pa -> m
-    SENSORS_ULTRASONIC, // m
     SENSORS_POSITION, // GPS Fix lat/lon/alt
     SENSORS_GROUNDSPEED, // m/s
     SENSORS_VOLTAGE, // V
     SENSORS_OPTICAL_FLOW, // rad/s
-    SENSORS_RANGE, // m
+    SENSORS_LIDAR, // m
     SENSORS_MAX
 } sensors_event_type_t;
 

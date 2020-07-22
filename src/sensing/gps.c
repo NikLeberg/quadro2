@@ -44,7 +44,7 @@ typedef struct __attribute__((packed)) {
     uint8_t id;
     uint16_t size;
     uint8_t ckA;
-    uint8_t ckB
+    uint8_t ckB;
 } gps_ubx_nav_pvt_t;
 
 static struct {
@@ -216,7 +216,10 @@ static bool gps_sendUBX(uint8_t *buffer, uint8_t length, bool aknowledge, TickTy
         }
     }
     // Schreiben
-    if (uart_write(GPS_UART, buffer, length)) return true;
+    if (uart_txAvailable(GPS_UART) < length) return true;
+    for (uint8_t i = 0; i < length; i++) {
+        uart_write(GPS_UART, buffer[i]);
+    }
     // AK / NAK
     if (!aknowledge) return false; // kein AK erforderlich
     uint8_t akPayload[2];
@@ -241,7 +244,8 @@ static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t
         uart_rxInterrupt(GPS_UART, true);
         if (xSemaphoreTake(gps.rxSemphr, timeout) == pdFALSE) break;
         uint8_t c, position = 0;
-        while (!uart_readByte(GPS_UART, &c)) {
+        while (uart_rxAvailable(GPS_UART)) {
+            c = uart_read(GPS_UART);
             ++position;
             switch (position) {
                 case (1): // Sync 1

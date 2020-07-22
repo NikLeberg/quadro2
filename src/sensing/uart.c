@@ -11,7 +11,7 @@
 /** Externe Abhängigkeiten **/
 
 #include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
+#include "freertos/queue.h"
 
 
 /** Interne Abhängigkeiten **/
@@ -25,7 +25,8 @@ extern uart_dev_t UART0;
 extern uart_dev_t UART1;
 extern uart_dev_t UART2;
 DRAM_ATTR uart_dev_t* const UART[UART_NUM_MAX] = {&UART0, &UART1, &UART2};
-SemaphoreHandle_t rxSemaphores[UART_NUM_MAX];
+QueueHandle_t rxQueues[UART_NUM_MAX]; // Queues die bei rx mit Zeitstempeln gefüllt wird
+int64_t rxDelaysUs[UART_NUM_MAX]; // Zeit die zum Empfang von einem Byte benötigt wird
 
 
 /*
@@ -40,7 +41,7 @@ static void uart_interrupt(void* arg);
 
 /** Implementierung **/
 
-bool uart_init(uart_port_t uartNum, gpio_num_t txPin, gpio_num_t rxPin, uint32_t baud_rate, SemaphoreHandle_t rxSemaphore) {
+bool uart_init(uart_port_t uartNum, gpio_num_t txPin, gpio_num_t rxPin, uint32_t baud_rate, QueueHandle_t rxTimestamp) {
     uart_dev_t *uart = UART[uartNum];
     // Aktivieren
     periph_module_enable(uartNum + 1);
@@ -62,7 +63,7 @@ bool uart_init(uart_port_t uartNum, gpio_num_t txPin, gpio_num_t rxPin, uint32_t
     // Baud
     uart_baud(uartNum, baud_rate);
     // Interrupt Handler registrieren
-    if (rxSemaphore) {
+    if (rxTimestamp) {
         if (esp_intr_alloc(ETS_UART0_INTR_SOURCE + uartNum, 0, uart_interrupt, (void*)uartNum, NULL)) return true;
         // Interrupts aktivieren
         uart->int_clr.val = UART_INTR_MASK;
@@ -70,7 +71,7 @@ bool uart_init(uart_port_t uartNum, gpio_num_t txPin, gpio_num_t rxPin, uint32_t
         uart->conf1.rx_tout_en = 1;
         uart->conf1.rxfifo_full_thrhd = 120; // Interrupt kurz vor rx-FIFO Überlauf damit dieser noch ohne Verlust geleert werden kann
         uart->int_ena.val = UART_RXFIFO_FULL_INT_ENA_M;
-        rxSemaphores[uartNum] = rxSemaphore;
+        rxQueues[uartNum] = rxTimestamp;
     }
     return false;
 }
@@ -82,60 +83,43 @@ bool uart_baud(uart_port_t uartNum, uint32_t baud_rate) {
         UART[uartNum]->clk_div.div_int = clk_div >> 4;
         UART[uartNum]->clk_div.div_frag = clk_div & 0xf;
     }
+    // rx Delay berechnen
+    // 10 Bits per 1 Byte / baud = Zeit in Sekunden
+    rxDelaysUs[uartNum] = 10.0 / baud_rate / 1000.0 / 1000.0;
     return false;
 }
 
-void uart_rxFifoReset(uart_port_t uartNum) {
+IRAM_ATTR void uart_rxFifoReset(uart_port_t uartNum) {
     uart_dev_t *uart = UART[uartNum];
     while (uart->status.rxfifo_cnt) {
         (volatile void) uart->fifo.rw_byte;
     }
 }
 
-void uart_rxInterrupt(uart_port_t uartNum, bool enabled) {
+IRAM_ATTR void uart_rxInterrupt(uart_port_t uartNum, bool enabled) {
     uart_dev_t *uart = UART[uartNum];
     uart->int_ena.rxfifo_tout = enabled;
     uart->int_ena.rxfifo_full = enabled;
 }
 
-bool uart_write(uart_port_t uartNum, uint8_t *buffer, uint8_t length) {
+uint8_t uart_txAvailable(uart_port_t uartNum) {
     uart_dev_t *uart = UART[uartNum];
-    // genügend Platz in FIFO?
-    if (length > (UART_FIFO_LEN - uart->status.txfifo_cnt)) return true; // zu gross für FIFO
-    // in FIFO schreiben
-    for (uint8_t i = 0; i < length; ++i) {
-        uart->fifo.rw_byte = buffer[i];
-    }
-    return false;
+    return (UART_FIFO_LEN - uart->status.txfifo_cnt);
 }
 
-bool uart_writeByte(uart_port_t uartNum, uint8_t value) {
+void uart_write(uart_port_t uartNum, uint8_t value) {
     uart_dev_t *uart = UART[uartNum];
-    // genügend Platz in FIFO?
-    if (1 > (UART_FIFO_LEN - uart->status.txfifo_cnt)) return true; // zu gross für FIFO
-    // in FIFO schreiben
     uart->fifo.rw_byte = value;
-    return false;
 }
 
-bool uart_read(uart_port_t uartNum, uint8_t *buffer, uint8_t length) {
+uint8_t uart_rxAvailable(uart_port_t uartNum) {
     uart_dev_t *uart = UART[uartNum];
-    if (uart->status.rxfifo_cnt >= length) {
-        for (uint8_t i = 0; i < length; ++i) {
-            buffer[i] = uart->fifo.rw_byte;
-        }
-        return false;
-    }
-    return true;
+    return uart->status.rxfifo_cnt;
 }
 
-bool uart_readByte(uart_port_t uartNum, uint8_t *value) {
+uint8_t uart_read(uart_port_t uartNum) {
     uart_dev_t *uart = UART[uartNum];
-    if (uart->status.rxfifo_cnt) {
-        *value = uart->fifo.rw_byte;
-        return false;
-    }
-    return true;
+    return uart->fifo.rw_byte;
 }
 
 IRAM_ATTR static void uart_interrupt(void* arg) {
@@ -146,9 +130,11 @@ IRAM_ATTR static void uart_interrupt(void* arg) {
     uart->int_clr.val = status; // aktive Interrupts zurücksetzen
     if (status & UART_RXFIFO_TOUT_INT_ST_M || // rx-Frame erhalten
         status & UART_RXFIFO_FULL_INT_ST_M) { // rx-FIFO bald voll
-        uart_rxInterrupt(uartNum, false); // interrupts deaktivieren
-        if (rxSemaphores[uartNum]) {
-            xSemaphoreGiveFromISR(rxSemaphores[uartNum], &woken); // rx beendet, entsperren
+        uart_rxInterrupt(uartNum, false); // rx-Interrupts deaktivieren
+        if (rxQueues[uartNum]) {
+            int64_t timestamp = esp_timer_get_time();
+            timestamp -= uart->status.rxfifo_cnt * rxDelaysUs[uartNum]; // ToDo: Zeit für TOUT Interrupt-generierung abziehen
+            xQueueSendFromISR(rxQueues[uartNum], &timestamp, &woken); // rx beendet, entsperren
         }
     } else if (status & UART_RXFIFO_OVF_INT_ST_M) { // rx-FIFO Überlauf
         uart_rxFifoReset(uartNum); // FIFO zurücksetzten
