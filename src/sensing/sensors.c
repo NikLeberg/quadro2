@@ -55,7 +55,7 @@
 #include "resources.h"
 #include "i2c.h"
 #include "bno.h"
-#include "ultrasonic.h"
+#include "flow.h"
 #include "gps.h"
 #include "ina.h"
 #include "eekf.h"
@@ -79,7 +79,7 @@ struct sensors_t {
         eekf_context ekf;
         eekf_mat x, P, z;
         int64_t lastTimestamp;
-        eekf_value errorAcceleration, errorUltrasonic, errorBarometer, errorGPS;
+        eekf_value errorAcceleration, errorUltrasonic, errorBarometer, errorGPS; // ToDo: auf Lidar umbenennen
         eekf_value limitVelocity;
     } Z;
 
@@ -130,7 +130,7 @@ static setting_t sensors_settings[SENSORS_SETTING_MAX] = {
     SETTING("rateSlow",         &sensors.rate.slow,             VALUE_TYPE_UINT),
 
     SETTING("zErrAccel",        &sensors.Z.errorAcceleration,   VALUE_TYPE_FLOAT),
-    SETTING("zErrUltrasonic",   &sensors.Z.errorUltrasonic,     VALUE_TYPE_FLOAT),
+    SETTING("zErrUltrasonic",   &sensors.Z.errorUltrasonic,     VALUE_TYPE_FLOAT), // ToDo: auf Lidar umbenennen
     SETTING("zErrBarometer",    &sensors.Z.errorBarometer,      VALUE_TYPE_FLOAT),
     SETTING("zErrGPS",          &sensors.Z.errorGPS,            VALUE_TYPE_FLOAT),
     SETTING("zLimitVelocity",   &sensors.Z.limitVelocity,       VALUE_TYPE_FLOAT),
@@ -201,7 +201,7 @@ eekf_return sensors_fuseX_measurement(eekf_mat* zp, eekf_mat* Jh, eekf_mat const
 
 bool sensors_init(gpio_num_t scl, gpio_num_t sda,                                   // I2C
                   uint8_t bnoAddress, gpio_num_t bnoInterrupt, gpio_num_t bnoReset, // BNO080
-                  gpio_num_t ultTrigger, gpio_num_t ultEcho,                        // Ultraschall
+                  gpio_num_t flowRxPin,                                             // Optischer Fluss & Lidar
                   gpio_num_t gpsRxPin, gpio_num_t gpsTxPin,                         // GPS
                   uint8_t inaAddress) {                                             // INA219
     // Intercom-Queue erstellen
@@ -219,10 +219,10 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     ESP_LOGD("sensors", "BNO init");
     ret = bno_init(bnoAddress, bnoInterrupt, bnoReset, sensors.rate.fast, sensors.rate.medium, sensors.rate.slow);
     ESP_LOGD("sensors", "BNO %s", ret ? "error" : "ok");
-    // Ultraschall initialisieren
-    ESP_LOGD("sensors", "ULT init");
-    ret = ult_init(ultTrigger, ultEcho, &sensors.rate.medium);
-    ESP_LOGD("sensors", "ULT %s", ret ? "error" : "ok");
+    // Optischer Fluss initialisieren
+    ESP_LOGD("sensors", "Flow init");
+    ret = flow_init(flowRxPin);
+    ESP_LOGD("sensors", "Flow %s", ret ? "error" : "ok");
     // GPS initialisieren
     ESP_LOGD("sensors", "GPS init");
     ret = gps_init(gpsRxPin, gpsTxPin, sensors.rate.slow);
@@ -234,7 +234,7 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     // Kalman Filter Z initialisieren
     EEKF_CALLOC_MATRIX(sensors.Z.x, 2, 1); // 2 States: Position, Geschwindigkeit
     EEKF_CALLOC_MATRIX(sensors.Z.P, 2, 2);
-    EEKF_CALLOC_MATRIX(sensors.Z.z, 3, 1); // 3 Messungen: Ultraschall, Barometer, GPS
+    EEKF_CALLOC_MATRIX(sensors.Z.z, 3, 1); // 3 Messungen: Ultraschall, Lidar, GPS
     sensors_fuseZ_reset();
     eekf_init(&sensors.Z.ekf, &sensors.Z.x, &sensors.Z.P, sensors_fuseZ_transition, sensors_fuseZ_measurement, NULL);
     // Kalman Filter Y initialisieren
@@ -290,9 +290,9 @@ static void sensors_processCommand(sensors_command_t command) {
             if (sensors.states[SENSORS_ALTIMETER]) {
                 sensors.homes.altitude = sensors.states[SENSORS_ALTIMETER]->vector.z;
             }
-            // Ultraschall
-            if (sensors.states[SENSORS_ULTRASONIC]) {
-                sensors.homes.distance = sensors.states[SENSORS_ULTRASONIC]->vector.z;
+            // Lidar
+            if (sensors.states[SENSORS_LIDAR]) {
+                sensors.homes.distance = sensors.states[SENSORS_LIDAR]->vector.z;
             }
             // Position
             if (sensors.states[SENSORS_POSITION]) {
@@ -341,10 +341,6 @@ static void sensors_processData(sensors_event_t *event) {
             ESP_LOGI("sensors", "%llu,B,%f,%f", event->timestamp, event->vector.z, event->accuracy);
             sensors_fuseZ(event->type, event->vector.z - sensors.homes.altitude, event->timestamp);
             break;
-        case (SENSORS_ULTRASONIC):
-            ESP_LOGI("sensors", "%llu,U,%f", event->timestamp, event->vector.z);
-            sensors_fuseZ(event->type, event->vector.z - sensors.homes.distance, event->timestamp);
-            break;
         case (SENSORS_POSITION):
             ESP_LOGI("sensors", "%llu,P,%f,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->vector.z, event->accuracy);
             sensors_fuseX(event->type, event->vector.x - sensors.homes.position.x, event->timestamp);
@@ -365,6 +361,17 @@ static void sensors_processData(sensors_event_t *event) {
                 pvPublish(xSensors, SENSORS_PV_VOLTAGE_LOW);
             }
             pvPublishFloat(xSensors, SENSORS_PV_VOLTAGE, event->value);
+            break;
+        case (SENSORS_OPTICAL_FLOW):
+            // ToDo: mit Gyro Daten korrigieren und der Fusion übergeben
+            ESP_LOGI("sensors", "%llu,F,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->accuracy);
+            // sensors_fuseX(event->type, event->vector.x, event->timestamp);
+            // sensors_fuseY(event->type, event->vector.y, event->timestamp);
+            break;
+        case (SENSORS_LIDAR):
+            ESP_LOGI("sensors", "%llu,L,%f", event->timestamp, event->vector.z - sensors.homes.distance);
+            sensors_fuseZ(event->type, event->vector.z - sensors.homes.distance, event->timestamp);
+            break;
         default:
             break;
     }
@@ -439,7 +446,7 @@ static void sensors_fuseZ(sensors_event_type_t type, float z, int64_t timestamp)
         // Mssunsicherheit
         EEKF_DECL_MAT_INIT(R, 3, 3, 0);
         switch (type) {
-            case (SENSORS_ULTRASONIC):
+            case (SENSORS_LIDAR):
                 *EEKF_MAT_EL(sensors.Z.z, 0, 0) = z;
                 *EEKF_MAT_EL(R, 0, 0) = sensors.Z.errorUltrasonic;
                 break;
@@ -496,7 +503,7 @@ eekf_return sensors_fuseZ_measurement(eekf_mat* zp, eekf_mat* Jh, eekf_mat const
     // Messmodell an Messung anpassen
     memset(Jh->elements, 0.0f, sizeof(eekf_value) * Jh->rows * Jh->cols);
     switch (type) {
-        case (SENSORS_ULTRASONIC):
+        case (SENSORS_LIDAR):
             *EEKF_MAT_EL(*Jh, 0, 0) = 1.0f;
             break;
         case (SENSORS_ALTIMETER):

@@ -125,8 +125,7 @@ typedef enum {
  * uint8_t bnoAddress: BNO I2C Adresse
  * gpio_num_t bnoInterrupt: BNO Interrupt Pin (Data ready)
  * gpio_num_t bnoReset: BNO Reset Pin
- * gpio_num_t ultTrigger: Ultraschall Trigger Pin
- * gpio_num_t ultEcho: Ultraschall Echo Pin
+ * gpio_num_t flowRxPin: Rx Pin des Optischen Fluss & Lidar
  * gpio_num_t gpsRxPin: Host RX GPS TX Pin
  * gpio_num_t gpsTxPin: Host TX GPS RX Pin
  * uint8_t inaAddress: INA I2C Adresse
@@ -135,6 +134,6 @@ typedef enum {
  */
 bool sensors_init(gpio_num_t scl, gpio_num_t sda,
                   uint8_t bnoAddress, gpio_num_t bnoInterrupt, gpio_num_t bnoReset,
-                  gpio_num_t ultTrigger, gpio_num_t ultEcho,
+                  gpio_num_t flowRxPin,                                             // Optischer Fluss & Lidar
                   gpio_num_t gpsRxPin, gpio_num_t gpsTxPin,
                   uint8_t inaAddress);

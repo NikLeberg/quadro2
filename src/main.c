@@ -73,8 +73,8 @@
 #define I2C_SDA             GPIO_NUM_17
 #define BNO_INTERRUPT       GPIO_NUM_23
 #define BNO_RESET           GPIO_NUM_22
-#define ULTRASONIC_TRIGGER  GPIO_NUM_18
-#define ULTRASONIC_ECHO     GPIO_NUM_16 // über Wiederstand-Spannungsteiler (5V -> 3.3V)
+// #define ULTRASONIC_TRIGGER  GPIO_NUM_18
+#define OP_FLOW_RX          GPIO_NUM_16 // über Wiederstand-Spannungsteiler (5V -> 3.3V)
 #define GPS_RX_HOST_TX      GPIO_NUM_21 // über 100 Ohm Wiederstand
 #define GPS_TX_HOST_RX      GPIO_NUM_19
 //#define LED_I2C             GPIO_NUM_22
@@ -88,7 +88,6 @@
 // - libesphttpd besser portieren
 // - gps ubx Prüfsumme wird nicht geprüft
 // - sensor timeout
-// - rateUpdate von Ultraschall ungetestet
 // - stack overflow in remote (nach längerer Zeit) / esphttpd (nach Website Refresh)
 
 typedef enum {
@@ -115,7 +114,7 @@ void app_main(void* arg) {
     ESP_LOGI("quadro2", "Starte Sensorik...");
     ret = sensors_init(I2C_SCL, I2C_SDA,
                        0x4B, BNO_INTERRUPT, BNO_RESET,
-                       ULTRASONIC_TRIGGER, ULTRASONIC_ECHO,
+                       OP_FLOW_RX,
                        GPS_TX_HOST_RX, GPS_RX_HOST_TX,
                        0x40);
     ESP_LOGI("quadro2", "Status Sensorik: %s", ret ? "Error" : "Ok");
