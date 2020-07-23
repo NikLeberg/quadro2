@@ -198,7 +198,7 @@ void bno_task(void* arg) {
             timeoutCount = 0;
         } else { // vermutlich ein Interrupt verpasst, prüfe
             if (gpio_get_level(bno.interruptPin) == 0 || ++timeoutCount > 3) {
-                if (timeoutCount > 3) pvPublishUint(xSensors, SENSORS_PV_TIMEOUT, SENSORS_ORIENTATION); // DEBUG
+                if (timeoutCount > 3) pvPublishUint(xSensors, SENSORS_PV_TIMEOUT, (0x1 << SENSORS_ORIENTATION)); // DEBUG, FixMe
                 event.timestamp = esp_timer_get_time();
                 xQueueSendToBack(xBno, &event, 0);
             }
