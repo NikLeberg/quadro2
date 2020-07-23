@@ -103,12 +103,12 @@ static void flow_task(void* arg) {
     // Variablen
     uint8_t buffer[sizeof(flow_motion_t)];
     int64_t timestamp;
+    uint8_t c, step = 0, crc = 0;
+    uint16_t id, length, pos = 0;
     // Loop
     while (true) {
         uart_rxInterrupt(FLOW_UART, true);
         xQueueReceive(xFlow, &timestamp, portMAX_DELAY);
-        uint8_t c, step = 0, crc = 0;
-        uint16_t id, length, pos = 0;
         while (uart_rxAvailable(FLOW_UART)) {
             c = uart_read(FLOW_UART);
             switch (step) {
