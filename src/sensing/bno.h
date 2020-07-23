@@ -34,11 +34,12 @@
  * uint32_t rateOrientation: Datenrate Orientierung
  * uint32_t rateAcceleration: Datenrate Beschleunigung
  * uint32_t ratePressure: Datenrate Barometer
+ * uint32_t rateGyro: Datenrate Gyroskop
  *
  * returns: false -> Erfolg, true -> Error
  */
 bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin,
-              uint32_t rateOrientation, uint32_t rateAcceleration, uint32_t ratePressure);
+              uint32_t rateOrientation, uint32_t rateAcceleration, uint32_t ratePressure, uint32_t rateGyro);
 
 /*
  * Function: bno_toWorldFrame
@@ -81,5 +82,6 @@ void bno_toEuler(vector_t *euler, orientation_t *quaternion);
  * uint32_t rateOrientation: Datenrate Orientierung
  * uint32_t rateAcceleration: Datenrate Beschleunigung
  * uint32_t ratePressure: Datenrate Barometer
+ * uint32_t rateGyro: Datenrate Gyroskop
  */
-void bno_updateRate(uint32_t rateOrientation, uint32_t rateAcceleration, uint32_t ratePressure);
+void bno_updateRate(uint32_t rateOrientation, uint32_t rateAcceleration, uint32_t ratePressure, uint32_t rateGyro);

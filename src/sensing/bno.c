@@ -60,6 +60,7 @@ static struct {
     sensors_event_t acceleration;
     sensors_event_t orientation;
     sensors_event_t altitude;
+    sensors_event_t rotation;
     event_t forward;
 } bno;
 
@@ -124,7 +125,7 @@ static bool bno_sensorEnable(sh2_SensorId_t sensorId, uint32_t interval_us);
 /** Implementierung **/
 
 bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin,
-              uint32_t rateOrientation, uint32_t rateAcceleration, uint32_t ratePressure) {
+              uint32_t rateOrientation, uint32_t rateAcceleration, uint32_t ratePressure, uint32_t rateGyro) {
     // Parameter speichern
     bno.address = address;
     bno.interruptPin = interruptPin;
@@ -134,6 +135,7 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin,
     bno.acceleration.type = SENSORS_ACCELERATION;
     bno.orientation.type = SENSORS_ORIENTATION;
     bno.altitude.type = SENSORS_ALTIMETER;
+    bno.rotation.type = SENSORS_ROTATION;
     bno.forward.type = EVENT_INTERNAL;
     // konfiguriere Pins und aktiviere Interrupts
     gpio_config_t gpioConfig;
@@ -166,6 +168,7 @@ bool bno_init(uint8_t address, gpio_num_t interruptPin, gpio_num_t resetPin,
     if (bno_sensorEnable(SH2_ROTATION_VECTOR, rateOrientation * 1000)) return true;
     if (bno_sensorEnable(SH2_LINEAR_ACCELERATION, rateAcceleration * 1000)) return true;
     if (bno_sensorEnable(SH2_PRESSURE, ratePressure * 1000)) return true;
+    if (bno_sensorEnable(SH2_GYROSCOPE_CALIBRATED, rateGyro * 1000)) return true;
     return false;
 }
 
@@ -318,6 +321,13 @@ static void bno_sensorEvent(void * cookie, sh2_SensorEvent_t *event) {
             bno.altitude.timestamp = value.timestamp;
             bno.forward.data = &bno.altitude;
             break;
+        case (SH2_GYROSCOPE_CALIBRATED):
+            bno.rotation.vector.x = value.un.gyroscope.x;
+            bno.rotation.vector.y = value.un.gyroscope.y;
+            bno.rotation.vector.z = value.un.gyroscope.z;
+            bno.rotation.timestamp = value.timestamp;
+            bno.forward.data = &bno.rotation;
+            break;
         default:
             return;
     }
@@ -347,7 +357,7 @@ static void bno_initDone(void *cookie, sh2_AsyncEvent_t *event) {
     }
 }
 
-void bno_updateRate(uint32_t rateOrientation, uint32_t rateAcceleration, uint32_t ratePressure) {
+void bno_updateRate(uint32_t rateOrientation, uint32_t rateAcceleration, uint32_t ratePressure, uint32_t rateGyro) {
     int32_t result;
     result = sh2_reinitialize();
     ESP_LOGD("bno", "reinit: %i", result);
@@ -358,6 +368,8 @@ void bno_updateRate(uint32_t rateOrientation, uint32_t rateAcceleration, uint32_
     ESP_LOGD("bno", "enable accel: %i", result);
     result = bno_sensorEnable(SH2_PRESSURE, ratePressure * 1000);
     ESP_LOGD("bno", "enable press: %i", result);
+    result = bno_sensorEnable(SH2_GYROSCOPE_CALIBRATED, rateGyro * 1000);
+    ESP_LOGD("bno", "enable gyro: %i", result);
 }
 
 /** sh2-hal Implementierung (sh2_hal.h) **/
