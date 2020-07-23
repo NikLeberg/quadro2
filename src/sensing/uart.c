@@ -69,7 +69,7 @@ bool uart_init(uart_port_t uartNum, gpio_num_t txPin, gpio_num_t rxPin, uint32_t
         uart->int_clr.val = UART_INTR_MASK;
         uart->conf1.rx_tout_thrhd = 10; // Interrupt nach Ende eines Frames
         uart->conf1.rx_tout_en = 1;
-        uart->conf1.rxfifo_full_thrhd = 120; // Interrupt kurz vor rx-FIFO Überlauf damit dieser noch ohne Verlust geleert werden kann
+        uart->conf1.rxfifo_full_thrhd = 100; // Interrupt kurz vor rx-FIFO Überlauf damit dieser noch ohne Verlust geleert werden kann
         uart->int_ena.val = UART_RXFIFO_FULL_INT_ENA_M;
         rxQueues[uartNum] = rxTimestamp;
     }
