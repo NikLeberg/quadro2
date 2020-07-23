@@ -79,7 +79,7 @@ struct sensors_t {
         eekf_context ekf;
         eekf_mat x, P, z;
         int64_t lastTimestamp;
-        eekf_value errorAcceleration, errorUltrasonic, errorBarometer, errorGPS; // ToDo: auf Lidar umbenennen
+        eekf_value errorAcceleration, errorLidar, errorBarometer, errorGPS;
         eekf_value limitVelocity;
     } Z;
 
@@ -111,6 +111,11 @@ struct sensors_t {
         float warning;
         float low;
     } voltage;
+
+    struct {
+        float scaleX;
+        float scaleY;
+    } flow;
 };
 static struct sensors_t sensors;
 
@@ -130,7 +135,7 @@ static setting_t sensors_settings[SENSORS_SETTING_MAX] = {
     SETTING("rateSlow",         &sensors.rate.slow,             VALUE_TYPE_UINT),
 
     SETTING("zErrAccel",        &sensors.Z.errorAcceleration,   VALUE_TYPE_FLOAT),
-    SETTING("zErrUltrasonic",   &sensors.Z.errorUltrasonic,     VALUE_TYPE_FLOAT), // ToDo: auf Lidar umbenennen
+    SETTING("zErrLidar",        &sensors.Z.errorLidar,          VALUE_TYPE_FLOAT),
     SETTING("zErrBarometer",    &sensors.Z.errorBarometer,      VALUE_TYPE_FLOAT),
     SETTING("zErrGPS",          &sensors.Z.errorGPS,            VALUE_TYPE_FLOAT),
     SETTING("zLimitVelocity",   &sensors.Z.limitVelocity,       VALUE_TYPE_FLOAT),
@@ -146,7 +151,10 @@ static setting_t sensors_settings[SENSORS_SETTING_MAX] = {
     SETTING("xLimitVelocity",   &sensors.X.limitVelocity,       VALUE_TYPE_FLOAT),
 
     SETTING("voltWarning",      &sensors.voltage.warning,       VALUE_TYPE_FLOAT),
-    SETTING("voltLow",          &sensors.voltage.low,           VALUE_TYPE_FLOAT)
+    SETTING("voltLow",          &sensors.voltage.low,           VALUE_TYPE_FLOAT),
+
+    SETTING("flowXScale",       &sensors.flow.scaleX,           VALUE_TYPE_FLOAT),
+    SETTING("flowYScale",       &sensors.flow.scaleY,           VALUE_TYPE_FLOAT)
 };
 static SETTING_LIST("sensors", sensors_settings, SENSORS_SETTING_MAX);
 
@@ -161,7 +169,12 @@ static pv_t sensors_pvs[SENSORS_PV_MAX] = {
     PV("vz", VALUE_TYPE_FLOAT),
     PV("volt", VALUE_TYPE_FLOAT),
     PV("voltWarning", VALUE_TYPE_NONE),
-    PV("voltLow", VALUE_TYPE_FLOAT)
+    PV("voltLow", VALUE_TYPE_FLOAT),
+    PV("flowX", VALUE_TYPE_FLOAT),
+    PV("flowY", VALUE_TYPE_FLOAT),
+    PV("gyroX", VALUE_TYPE_FLOAT),
+    PV("gyroY", VALUE_TYPE_FLOAT),
+    PV("gyroZ", VALUE_TYPE_FLOAT)
 };
 static PV_LIST("sensors", sensors_pvs, SENSORS_PV_MAX);
 
@@ -215,9 +228,9 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     ESP_LOGD("sensors", "I2C init");
     ret = i2c_init(scl, sda);
     ESP_LOGD("sensors", "I2C %s", ret ? "error" : "ok");
-    // BNO initialisieren + Reports für Beschleunigung, Orientierung und Druck aktivieren
+    // BNO initialisieren + Reports für Beschleunigung, Orientierung, Druck und Rotation aktivieren
     ESP_LOGD("sensors", "BNO init");
-    ret = bno_init(bnoAddress, bnoInterrupt, bnoReset, sensors.rate.fast, sensors.rate.medium, sensors.rate.slow);
+    ret = bno_init(bnoAddress, bnoInterrupt, bnoReset, sensors.rate.fast, sensors.rate.medium, sensors.rate.slow, sensors.rate.medium);
     ESP_LOGD("sensors", "BNO %s", ret ? "error" : "ok");
     // Optischer Fluss initialisieren
     ESP_LOGD("sensors", "Flow init");
@@ -250,7 +263,7 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     sensors_fuseX_reset();
     eekf_init(&sensors.X.ekf, &sensors.X.x, &sensors.X.P, sensors_fuseX_transition, sensors_fuseX_measurement, NULL);
     // installiere task
-    if (xTaskCreate(&sensors_task, "sensors", 3 * 1024, NULL, xSensors_PRIORITY, NULL) != pdTRUE) return true;
+    if (xTaskCreate(&sensors_task, "sensors", 4 * 1024, NULL, xSensors_PRIORITY, NULL) != pdTRUE) return true;
     return ret;
 }
 
@@ -278,7 +291,7 @@ void sensors_task(void* arg) {
         // lösche wenn Platz gering wird
         if (uxQueueSpacesAvailable(xSensors) <= 1) {
             xQueueReset(xSensors);
-            ESP_LOGE("sensors", "queue reset!");
+            ESP_LOGE("sensors", "queue reset! tLag %llu", esp_timer_get_time() - ((sensors_event_t*)event.data)->timestamp);
         }
     }
 }
@@ -313,7 +326,7 @@ static void sensors_processCommand(sensors_command_t command) {
             xQueueReset(xSensors);
             break;
         case (SENSORS_COMMAND_UPDATE_RATE):
-            bno_updateRate(sensors.rate.fast, sensors.rate.medium, sensors.rate.slow);
+            bno_updateRate(sensors.rate.fast, sensors.rate.medium, sensors.rate.slow, sensors.rate.medium);
             gps_updateRate(sensors.rate.slow);
             break;
         default:
@@ -341,6 +354,12 @@ static void sensors_processData(sensors_event_t *event) {
             ESP_LOGI("sensors", "%llu,B,%f,%f", event->timestamp, event->vector.z, event->accuracy);
             sensors_fuseZ(event->type, event->vector.z - sensors.homes.altitude, event->timestamp);
             break;
+        case (SENSORS_ROTATION):
+            pvPublishFloat(xSensors, SENSORS_PV_GYRO_X, event->vector.x);
+            pvPublishFloat(xSensors, SENSORS_PV_GYRO_Y, event->vector.y);
+            pvPublishFloat(xSensors, SENSORS_PV_GYRO_Z, event->vector.z);
+            ESP_LOGI("sensors", "%llu,R,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->vector.z);
+            break;
         case (SENSORS_POSITION):
             ESP_LOGI("sensors", "%llu,P,%f,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->vector.z, event->accuracy);
             sensors_fuseX(event->type, event->vector.x - sensors.homes.position.x, event->timestamp);
@@ -364,6 +383,11 @@ static void sensors_processData(sensors_event_t *event) {
             break;
         case (SENSORS_OPTICAL_FLOW):
             // ToDo: mit Gyro Daten korrigieren und der Fusion übergeben
+            // DEBUG
+            event->vector.x *= sensors.flow.scaleX;
+            event->vector.y *= sensors.flow.scaleY;
+            pvPublishFloat(xSensors, SENSORS_PV_FLOW_X, event->vector.x);
+            pvPublishFloat(xSensors, SENSORS_PV_FLOW_Y, event->vector.y);
             ESP_LOGI("sensors", "%llu,F,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->accuracy);
             // sensors_fuseX(event->type, event->vector.x, event->timestamp);
             // sensors_fuseY(event->type, event->vector.y, event->timestamp);
@@ -448,7 +472,7 @@ static void sensors_fuseZ(sensors_event_type_t type, float z, int64_t timestamp)
         switch (type) {
             case (SENSORS_LIDAR):
                 *EEKF_MAT_EL(sensors.Z.z, 0, 0) = z;
-                *EEKF_MAT_EL(R, 0, 0) = sensors.Z.errorUltrasonic;
+                *EEKF_MAT_EL(R, 0, 0) = sensors.Z.errorLidar;
                 break;
             case (SENSORS_ALTIMETER):
                 *EEKF_MAT_EL(sensors.Z.z, 1, 0) = z;

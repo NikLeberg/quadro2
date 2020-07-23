@@ -90,6 +90,9 @@ typedef enum {
     // Spannungslimits
     SENSORS_SETTING_VOLTAGE_WARNING,
     SENSORS_SETTING_VOLTAGE_LOW,
+    // Flow Skalierung
+    SENSORS_SETTING_FLOW_SCALE_X,
+    SENSORS_SETTING_FLOW_SCALE_Y,
     SENSORS_SETTING_MAX
 } sensors_setting_t;
 
@@ -111,6 +114,11 @@ typedef enum {
     SENSORS_PV_VOLTAGE,
     SENSORS_PV_VOLTAGE_WARN,
     SENSORS_PV_VOLTAGE_LOW,
+    SENSORS_PV_FLOW_X,
+    SENSORS_PV_FLOW_Y,
+    SENSORS_PV_GYRO_X,
+    SENSORS_PV_GYRO_Y,
+    SENSORS_PV_GYRO_Z,
     SENSORS_PV_MAX
 } sensors_pv_t;
 
