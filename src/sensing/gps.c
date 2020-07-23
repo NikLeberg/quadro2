@@ -38,22 +38,72 @@
 #endif
 
 typedef struct __attribute__((packed)) {
-    uint8_t sync1;  // 0xb5
-    uint8_t sync2;  // 0b62
-    uint8_t class;
-    uint8_t id;
-    uint16_t size;
-    uint8_t ckA;
-    uint8_t ckB;
+    uint32_t iTow;                  // ms
+    uint16_t year;
+    uint8_t month;
+    uint8_t day;
+    uint8_t hour;
+    uint8_t minute;
+    uint8_t second;
+    union {
+        struct {
+            uint8_t validDate : 1;
+            uint8_t validTime : 1;
+            uint8_t fullyResolved : 1;
+            uint8_t validMag : 1;
+            uint8_t reserved1 : 4;
+        };
+        uint8_t valid;
+    } valid;
+    uint32_t timeAccuracy;          // ns
+    int32_t nanoSecond;             // ns
+    uint8_t fixType;
+    union {
+        struct {
+            uint8_t gnssFixOk : 1;
+            uint8_t differentialSolution : 1;
+            uint8_t psmState : 3;       // ???
+            uint8_t validHeadingOfVehicle : 1;
+            uint8_t carrierSolution : 2;
+        };
+        uint8_t flags1;
+    } flags1;
+    uint8_t flags2;
+    uint8_t numSatellites;
+    int32_t longitude;              // °
+    int32_t latitude;               // °
+    int32_t height;                 // mm
+    int32_t heightMSL;              // mm
+    uint32_t HDOP;                  // mm
+    uint32_t VDOP;                  // mm
+    int32_t velocityNorth;          // mm/s
+    int32_t velocityEast;           // mm/s
+    int32_t velocityDown;           // mm/s
+    int32_t groundSpeed;            // mm/s
+    int32_t headingOfMotion;        // °
+    uint32_t velocityAccuracy;      // mm/s
+    uint32_t headingAccuracy;       // °
+    uint16_t PDOP;
+    union {
+        struct {
+            uint8_t invalidLatLonAlt : 1;
+            uint8_t reserved2 : 7;
+        };
+        uint8_t flags;
+    } flags3;
+    uint8_t reserved3[5];
+    int32_t headingVehicle;         // °
+    int16_t magneticDeclination;    // °
+    uint16_t magneticAccuracy;      // °
 } gps_ubx_nav_pvt_t;
 
 static struct {
-    SemaphoreHandle_t rxSemphr;
-
     sensors_event_t position;
     sensors_event_t speed;
     event_t forward;
 } gps;
+
+static QueueHandle_t xGps;
 
 
 /** Private Functions **/
@@ -92,10 +142,11 @@ static bool gps_sendUBX(uint8_t *buffer, uint8_t length, bool aknowledge, TickTy
  * uint8_t id: Id der zu empfangenden Nachricht
  * uint8_t length: Länge des Payloads
  * TickType_t timeout: maximale Blockzeit
+ * int64_t *timestamp: wird gefüllt mit dem Zeitpunkt des Empfanges
  *
  * returns: false -> Erfolg, true -> Error
  */
-static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t length, TickType_t timeout);
+static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t length, TickType_t timeout, int64_t *timestamp);
 
 
 /** Implementierung **/
@@ -105,9 +156,9 @@ bool gps_init(gpio_num_t rxPin, gpio_num_t txPin, uint32_t rate) {
     gps.position.type = SENSORS_POSITION;
     gps.speed.type = SENSORS_GROUNDSPEED;
     gps.forward.type = EVENT_INTERNAL;
-    gps.rxSemphr = xSemaphoreCreateBinary();
+    xGps = xQueueCreate(2, sizeof(int64_t));
     // eigener UART Treiber installieren
-    uart_init(GPS_UART, txPin, rxPin, 9600, gps.rxSemphr);
+    uart_init(GPS_UART, txPin, rxPin, 9600, xGps);
     // u-Blox Chip konfigurieren
     // UBX-CFG-PRT: NMEA deaktivieren, UART Baudrate auf 256000 setzen
     uint8_t msgPort[] = {0xB5, 0x62, 0x06, 0x00, 0x14, 0x00, 0x01,
@@ -155,31 +206,22 @@ bool gps_init(gpio_num_t rxPin, gpio_num_t txPin, uint32_t rate) {
 
 void gps_task(void* arg) {
     // Variablen
-    uint8_t nav[92];
+    uint8_t buffer[sizeof(gps_ubx_nav_pvt_t)];
+    gps_ubx_nav_pvt_t *nav;
     vector_t v;
     // UBX-NAV-PVT Frames parsen
     while (true) {
-        gps_receiveUBX(nav, 0x01, 0x07, 92, portMAX_DELAY);
-        gps.position.timestamp = esp_timer_get_time();
+        gps_receiveUBX(buffer, 0x01, 0x07, sizeof(gps_ubx_nav_pvt_t), portMAX_DELAY, &gps.position.timestamp);
         gps.speed.timestamp = gps.position.timestamp;
-        // Zeit
-        // uint16_t jear = (nav[5] << 8) | (nav[4]);
-        // uint8_t month = nav[6];
-        // uint8_t day = nav[7];
-        // uint8_t hour = nav[8];
-        // uint8_t minute = nav[9];
-        // uint8_t second = nav[10];
+        nav = (gps_ubx_nav_pvt_t*)&buffer[0];
         // Fix-Typ & Satelitenanzahl
-        uint8_t fixType = nav[20];
-        // uint8_t satNum = nav[23];
-        if (fixType == 0 || fixType == 5) continue; // noch kein Fix oder nur Zeit-Fix
+        if (nav->fixType == 0 || nav->fixType == 5) continue; // noch kein Fix oder nur Zeit-Fix
         // Position als y = Longitude / x = Latitude / z = Altitude
         // Laitude - Quer / Logitude - oben nach unten
-        v.y = (int32_t) ((nav[27] << 24) | (nav[26] << 16) | (nav[25] << 8) | (nav[24])) * 1e-7; // °
-        v.x = (int32_t) ((nav[31] << 24) | (nav[30] << 16) | (nav[29] << 8) | (nav[28])) * 1e-7; // °
-        v.z = (int32_t) ((nav[39] << 24) | (nav[38] << 16) | (nav[37] << 8) | (nav[36])) / 1e+3; // m
-        gps.position.accuracy = (uint32_t) ((nav[43] << 24) | (nav[42] << 16) | (nav[41] << 8) | (nav[40])) / 1e+3; // HDOP
-        // float vAccuracy = (uint32_t) ((nav[47] << 24) | (nav[46] << 16) | (nav[45] << 8) | (nav[44])) / 1e+3; // VDOP
+        v.y = nav->latitude * 1e-7;     // °
+        v.x = nav->longitude * 1e-7;    // °
+        v.z = nav->heightMSL / 1e+3;    // m
+        gps.position.accuracy = nav->HDOP / 1e+3; // HDOP
         // Longitude & Latitude in Meter umrechnen
         // -> https://gis.stackexchange.com/questions/2951
         gps.position.vector.y = v.y * 111111.0f * cosf(v.x * M_PI / 180.0f);
@@ -189,10 +231,10 @@ void gps_task(void* arg) {
         xQueueSendToBack(xSensors, &gps.forward, 0);
         // Geschwindigkeit
         // Koordinatensystem wechseln: GPS ist im NED, quadro ist im ENU
-        gps.speed.vector.y = (int32_t) ((nav[51] << 24) | (nav[50] << 16) | (nav[49] << 8) | (nav[48])) / 1e+3;
-        gps.speed.vector.x = (int32_t) ((nav[55] << 24) | (nav[54] << 16) | (nav[53] << 8) | (nav[52])) / 1e+3;
-        gps.speed.vector.z = -(int32_t) ((nav[59] << 24) | (nav[58] << 16) | (nav[57] << 8) | (nav[56])) / 1e+3;
-        gps.speed.accuracy = (uint32_t) ((nav[71] << 24) | (nav[70] << 16) | (nav[69] << 8) | (nav[68])) / 1e+3;
+        gps.speed.vector.y = nav->velocityNorth / 1e+3;
+        gps.speed.vector.x = nav->velocityEast / 1e+3;
+        gps.speed.vector.z = -nav->velocityDown / 1e+3;
+        gps.speed.accuracy = nav->velocityAccuracy / 1e+3;
         gps.forward.data = &gps.speed;
         xQueueSendToBack(xSensors, &gps.forward, 0);
     }
@@ -222,18 +264,19 @@ static bool gps_sendUBX(uint8_t *buffer, uint8_t length, bool aknowledge, TickTy
     }
     // AK / NAK
     if (!aknowledge) return false; // kein AK erforderlich
-    uint8_t akPayload[2];
     if (timeout != portMAX_DELAY) {
         TickType_t dTick = xTaskGetTickCount() - startTick;
         if (dTick >= timeout) timeout = 0;
         else timeout -= dTick;
     }
-    if (gps_receiveUBX(akPayload, 0x05, 0x01, 2, timeout)) return true;
+    uint8_t akPayload[2];
+    int64_t timestamp;
+    if (gps_receiveUBX(akPayload, 0x05, 0x01, 2, timeout, &timestamp)) return true;
     if (akPayload[0] == buffer[2] && akPayload[1] == buffer[3]) return false;
     else return true;
 }
 
-static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t length, TickType_t timeout) {
+static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t length, TickType_t timeout, int64_t *timestamp) {
     TickType_t startTick = xTaskGetTickCount();
     while (timeout) {
         if (timeout != portMAX_DELAY) {
@@ -242,34 +285,56 @@ static bool gps_receiveUBX(uint8_t *payload, uint8_t class, uint8_t id, uint16_t
             else timeout -= dTick;
         }
         uart_rxInterrupt(GPS_UART, true);
-        if (xSemaphoreTake(gps.rxSemphr, timeout) == pdFALSE) break;
-        uint8_t c, position = 0;
+        if (xQueueReceive(xGps, timestamp, timeout) == pdFALSE) break;
+        uint8_t c, step = 0, ckA = 0, ckB = 0;
+        uint16_t pos = 0;
         while (uart_rxAvailable(GPS_UART)) {
             c = uart_read(GPS_UART);
-            ++position;
-            switch (position) {
-                case (1): // Sync 1
-                    if (c != 0xb5) position = 0;
+            switch (step) {
+                case 0: // Sync 1
+                    if (c == 0xb5) {
+                        ckA = 0;
+                        ckB = 0;
+                        pos = 0;
+                        step++; // ToDo: mitzählen wie viel übersprungen wurde und timestamp neu rechnen
+                    }
                     break;
-                case (2): // Sync 2
-                    if (c != 0x62) position = 0;
+                case 1: // Sync 2
+                    if (c == 0x62) step++;
+                    else step = 0;
                     break;
-                case (3): // Class
-                    if (c != class) position = 0;
+                case 2: // Class
+                    if (c == class) step++;
+                    else step = 0;
                     break;
-                case (4): // ID
-                    if (c != id) position = 0;
+                case 3: // Id
+                    if (c == id) step++;
+                    else step = 0;
                     break;
-                case (5): // Size LSB
-                    if (c != (length & 0x00ff)) position = 0;
+                case 4: // Size LSB
+                    if (c == (length & 0x00ff)) step++;
+                    else step = 0;
                     break;
-                case (6): // Size MSB
-                    if (c != (length >> 8)) position = 0;
+                case 5: // Size MSB
+                    if (c == (length >> 8)) step++;
+                    else step = 0;
                     break;
-                default: // Payload
-                    if (position - 7 < length) payload[position - 7] = c;
-                    else return false; // Frame empfangen (ohne Prüfsummencheck)
+                case 6: // Payload
+                    payload[pos++] = c;
+                    if (pos == length) step++;
                     break;
+                case 7: // ckA
+                    if (c == ckA) step++;
+                    else return true; // Prüfsumme A fehlerhaft
+                    break;
+                case 8: // ckB
+                    if (c == ckB) return false; // erfolgreich empfangen
+                    else return true; // Prüfsumme B fehlerhaft
+                    break;
+            }
+            if (step > 2 && step < 8) { // Prüfsumme ab Class bis vor ckA rechnen
+                ckA += c;
+                ckB += ckA;
             }
         }
     }
