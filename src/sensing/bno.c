@@ -177,11 +177,10 @@ void bno_task(void* arg) {
     bno_event_t event;
     uint16_t readLength, rxRemaining = 0;
     uint8_t timeoutCount = 0;
+    while (!bno.onRx) vTaskDelay(1); // auf sh2-Lib Registrierung (nach reset) warten
     // Loop
     while (true) {
         if (xQueueReceive(xBno, &event, bno.timeout) == pdTRUE) {
-            // ist sh2-Lib registriert?
-            if (!bno.onRx) continue;
             // Datenlänge berechnen, mindestens Header, maximal MAX_TRANSFER
             readLength = rxRemaining;
             if (readLength < SHTP_HEADER_LEN) readLength = SHTP_HEADER_LEN;
@@ -376,13 +375,13 @@ void bno_updateRate(uint32_t rateOrientation, uint32_t rateAcceleration, uint32_
 int sh2_hal_reset(bool dfuMode, sh2_rxCallback_t *onRx, void *cookie) {
     // DFU-Modus nicht unterstützt
     configASSERT(!dfuMode);
-    // Callback registrieren
-    bno.onRx = onRx;
     // Sensor-Reset
     gpio_set_level(bno.resetPin, 0);
     vTaskDelay(100 / portTICK_PERIOD_MS);
     gpio_set_level(bno.resetPin, 1);
     vTaskDelay(200 / portTICK_PERIOD_MS);
+    // Callback speichern
+    bno.onRx = onRx;
     return SH2_OK;
 }
 
@@ -397,7 +396,7 @@ int sh2_hal_rx(uint8_t *pData, uint32_t len) {
 
 int sh2_hal_block(void) {
     if (xSemaphoreTake(bno.sh2Lock, BNO_STARTUP_WAIT_MS / portTICK_PERIOD_MS) == pdFALSE) {
-        pvPublishUint(xSensors, SENSORS_PV_TIMEOUT, SENSORS_ORIENTATION); // DEBUG
+        ESP_LOGE("bno", "lock err %u", ++errCount);
     }
     return SH2_OK;
 }
