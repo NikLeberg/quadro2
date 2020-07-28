@@ -25,14 +25,14 @@ extern uart_dev_t UART0;
 extern uart_dev_t UART1;
 extern uart_dev_t UART2;
 DRAM_ATTR uart_dev_t* const UART[UART_NUM_MAX] = {&UART0, &UART1, &UART2};
-QueueHandle_t rxQueues[UART_NUM_MAX]; // Queues die bei rx mit Zeitstempeln gefüllt wird
-int64_t rxDelaysUs[UART_NUM_MAX]; // Zeit die zum Empfang von einem Byte benötigt wird
+static QueueHandle_t rxQueues[UART_NUM_MAX]; // Queues die bei rx mit Zeitstempeln gefüllt wird
+static int64_t rxDelaysUs[UART_NUM_MAX]; // Zeit die zum Empfang von einem Byte benötigt wird
 
 
 /*
  * Function: uart_interrupt
  * ----------------------------
- * ISR. Ausgeführt bei UART-Events. Setzt UART zurück bei Fehler oder entsperrt Semaphoren.
+ * ISR. Ausgeführt bei UART-Events. Setzt UART zurück bei Fehler oder füllt Queues.
  *
  * void* arg: [(uart_port_t) uartNum]: entsprechende UART-Nummer
  */
