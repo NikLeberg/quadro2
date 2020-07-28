@@ -24,8 +24,6 @@
 /** Compiler Einstellungen **/
 
 #define REMOTE_CONNECTION_COUNT (10U)   // Anzahl gleichzeitiger Verbindungen
-#define REMOTE_START_AFTER_STOP 1       // Nach WLAN Error automatisch Verbindung neustarten
-#define REMOTE_RESET_AFTER_STOP 1       // Nach WLAN Error Neustarten
 #define REMOTE_TIMEOUT_MS 500           // Verbindungstimeout
 
 
