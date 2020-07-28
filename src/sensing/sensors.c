@@ -15,8 +15,13 @@
  *    BN-880Q:    - GPS, GLONASS, BeiDou, SBAS, Galileo
  * 
  * Alle Sensoren sind in ihrem eigenen Task implementiert.
- * Neue Sensordaten werden dem Sensor-Task mitgeteilt welcher den absoluten Status des Systems
- * aktualisiert, Sensor-Fusion betreibt und an registrierte Handler weiterleitet.
+ * Die Sensortask verarbeiten ihre Datan so weit wie möglich, wenn Daten anderer Sensoren gebraucht
+ * würden, wird der "Rohwert" übergeben.
+ * Neue Sensordaten werden dem Sensor-Task mitgeteilt welcher:
+ *  - Homepunkte anwendet
+ *  - ggf. Rohwerte mit anderen Sensoren verarbeitet
+ *  - Sensorfusion betreibt
+ *  - den globalen Status aktualisiert
  * 
  * Systemstatus: (alle Werte im ENU Koordinatensystem)
  *  - Orientierung
@@ -99,7 +104,25 @@ struct sensors_t {
         eekf_value limitVelocity;
     } X;
 
-    sensors_event_t *states[SENSORS_MAX];
+    sensors_event_t *rawData[SENSORS_MAX];
+
+    struct { // verarbeitete Sensordaten:  Struktur     Elemente        Einheit     Quelle
+        sensors_event_t orientation;    // orientation  i j k real      Quaternion  bno
+        sensors_event_t euler;          // vector       pitch roll yaw  rad         bno
+        sensors_event_t rotation;       // vector       x y z           rad/s       bno
+        sensors_event_t acceleration;   // vector       x y z           m/s^2       bno
+        sensors_event_t altitude;       // value                        m           bme
+        sensors_event_t distance;       // value                        m           lidar
+        sensors_event_t flow;           // vector       x y             m/s         flow
+        sensors_event_t volt;           // value                        V           ina
+        sensors_event_t coordinates;    // vector       x y z           m           gps
+        sensors_event_t speed;          // vector       x y z           m/s         gps
+        // Sensorfusion
+        sensors_event_t velocity;       // vector       x y z           m/s         fusion
+        sensors_event_t position;       // vector       x y z           m           fusion
+        // Semaphor
+        SemaphoreHandle_t lock;
+    } data;
 
     struct {
         float altitude;
@@ -223,6 +246,9 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     commandRegister(xSensors, sensors_commands);
     settingRegister(xSensors, sensors_settings);
     pvRegister(xSensors, sensors_pvs);
+    // Datenzugriffsschutz
+    sensors.data.lock = xSemaphoreCreateMutex();
+    xSemaphoreGive(sensors.data.lock);
     // I2C initialisieren
     bool ret = false;
     ESP_LOGD("sensors", "I2C init");
@@ -300,17 +326,16 @@ static void sensors_processCommand(sensors_command_t command) {
     switch (command) {
         case (SENSORS_COMMAND_SET_HOME):
             // Altitude
-            if (sensors.states[SENSORS_ALTIMETER]) {
-                sensors.homes.altitude = sensors.states[SENSORS_ALTIMETER]->vector.z;
-            }
+            sensors.homes.altitude = sensors.data.altitude.value;
+            sensors.data.altitude.value = 0.0f;
             // Lidar
-            if (sensors.states[SENSORS_LIDAR]) {
-                sensors.homes.distance = sensors.states[SENSORS_LIDAR]->vector.z;
-            }
+            sensors.homes.distance = sensors.data.distance.value;
+            sensors.data.distance.value = 0.0f;
             // Position
-            if (sensors.states[SENSORS_POSITION]) {
-                sensors.homes.position = sensors.states[SENSORS_POSITION]->vector;
-            }
+            sensors.homes.position = sensors.data.coordinates.vector;
+            sensors.data.coordinates.vector.x = 0.0f;
+            sensors.data.coordinates.vector.y = 0.0f;
+            sensors.data.coordinates.vector.z = 0.0f;
             // break; nach setHome immer auch Fusion zurücksetzen
         case (SENSORS_COMMAND_RESET_FUSION):
             sensors_fuseX_reset();
@@ -318,9 +343,8 @@ static void sensors_processCommand(sensors_command_t command) {
             sensors_fuseZ_reset();
             break;
         case (SENSORS_COMMAND_SET_ALTIMETER_TO_GPS):
-            if (sensors.states[SENSORS_POSITION] && sensors.states[SENSORS_ALTIMETER]) {
-                sensors.homes.altitude += sensors.states[SENSORS_POSITION]->vector.z - sensors.states[SENSORS_ALTIMETER]->vector.z;
-            }
+            sensors.homes.altitude += sensors.data.coordinates.vector.z - sensors.data.altitude.value;
+            sensors.data.altitude.value = sensors.data.coordinates.vector.z;
             break;
         case (SENSORS_COMMAND_RESET_QUEUE):
             xQueueReset(xSensors);
@@ -336,69 +360,96 @@ static void sensors_processCommand(sensors_command_t command) {
 }
 
 static void sensors_processData(sensors_event_t *event) {
+    int64_t timestamp = event->timestamp;
+    sensors_event_type_t type = event->type;
     // Sensorzustand speichern
-    sensors.states[event->type] = event;
+    sensors.rawData[type] = event;
+    // Datenzugriff sperren
+    if (xSemaphoreTake(sensors.data.lock, SENSORS_DATA_LOCK / portTICK_PERIOD_MS) == pdFALSE) configASSERT(true);
     // Verarbeiten
-    switch (event->type) {
+    switch (type) {
         case (SENSORS_ACCELERATION):
-            // ESP_LOGI("sensors", "%llu,A,%f,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->vector.z, event->accuracy);
-            sensors_fuseX(event->type, event->vector.x, event->timestamp);
-            sensors_fuseY(event->type, event->vector.y, event->timestamp);
-            sensors_fuseZ(event->type, event->vector.z, event->timestamp);
+            sensors.data.acceleration = *event;
+            sensors_fuseX(SENSORS_ACCELERATION, sensors.data.acceleration.vector.x, timestamp);
+            sensors_fuseY(SENSORS_ACCELERATION, sensors.data.acceleration.vector.y, timestamp);
+            sensors_fuseZ(SENSORS_ACCELERATION, sensors.data.acceleration.vector.z, timestamp);
             break;
         case (SENSORS_ORIENTATION):
-            // ESP_LOGI("sensors", "%llu,O,%f,%f,%f,%f,%f", event->timestamp, event->orientation.i, event->orientation.j, event->orientation.k, event->orientation.real, event->accuracy);
+            sensors.data.orientation = *event;
+            bno_toEuler(&sensors.data.euler.vector, &sensors.data.orientation.orientation);
+            sensors.data.euler.timestamp = timestamp;
             pvPublish(xSensors, SENSORS_PV_ORIENTATION);
             break;
         case (SENSORS_ALTIMETER):
-            ESP_LOGI("sensors", "%llu,B,%f,%f", event->timestamp, event->vector.z, event->accuracy);
-            sensors_fuseZ(event->type, event->vector.z - sensors.homes.altitude, event->timestamp);
+            sensors.data.altitude.value = event->vector.z - sensors.homes.altitude;
+            sensors.data.altitude.timestamp = timestamp;
+            sensors_fuseZ(SENSORS_ALTIMETER, sensors.data.altitude.value, timestamp);
             break;
         case (SENSORS_ROTATION):
+            sensors.data.rotation = *event;
             pvPublishFloat(xSensors, SENSORS_PV_GYRO_X, event->vector.x);
             pvPublishFloat(xSensors, SENSORS_PV_GYRO_Y, event->vector.y);
             pvPublishFloat(xSensors, SENSORS_PV_GYRO_Z, event->vector.z);
-            ESP_LOGI("sensors", "%llu,R,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->vector.z);
             break;
         case (SENSORS_POSITION):
-            ESP_LOGI("sensors", "%llu,P,%f,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->vector.z, event->accuracy);
-            sensors_fuseX(event->type, event->vector.x - sensors.homes.position.x, event->timestamp);
-            sensors_fuseY(event->type, event->vector.y - sensors.homes.position.y, event->timestamp);
-            sensors_fuseZ(event->type, event->vector.z - sensors.homes.position.z, event->timestamp);
+            sensors.data.coordinates.vector.x = event->vector.x - sensors.homes.position.x;
+            sensors.data.coordinates.vector.y = event->vector.y - sensors.homes.position.y;
+            sensors.data.coordinates.vector.z = event->vector.z - sensors.homes.position.z;
+            sensors.data.coordinates.accuracy = event->accuracy;
+            sensors.data.coordinates.timestamp = timestamp;
+            sensors_fuseX(SENSORS_POSITION, sensors.data.coordinates.vector.x, timestamp);
+            sensors_fuseY(SENSORS_POSITION, sensors.data.coordinates.vector.y, timestamp);
+            sensors_fuseZ(SENSORS_POSITION, sensors.data.coordinates.vector.z, timestamp);
             break;
         case (SENSORS_GROUNDSPEED):
-            ESP_LOGI("sensors", "%llu,S,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->accuracy);
-            sensors_fuseX(event->type, event->vector.x, event->timestamp);
-            sensors_fuseY(event->type, event->vector.y, event->timestamp);
-            // sensors_fuseZ(event->type, event->vector.z, event->timestamp);
+            sensors.data.speed = *event;
+            sensors_fuseX(SENSORS_GROUNDSPEED, event->vector.x, timestamp);
+            sensors_fuseY(SENSORS_GROUNDSPEED, event->vector.y, timestamp);
+            // sensors_fuseZ(SENSORS_GROUNDSPEED, event->vector.z, timestamp);
             break;
         case (SENSORS_VOLTAGE):
-            if (event->value < sensors.voltage.warning) {
+            sensors.data.volt = *event;
+            if (sensors.data.volt.value < sensors.voltage.warning) {
                 pvPublish(xSensors, SENSORS_PV_VOLTAGE_WARN);
-            }
-            if (event->value < sensors.voltage.low) {
+            } else if (sensors.data.volt.value < sensors.voltage.low) {
                 pvPublish(xSensors, SENSORS_PV_VOLTAGE_LOW);
             }
-            pvPublishFloat(xSensors, SENSORS_PV_VOLTAGE, event->value);
+            pvPublishFloat(xSensors, SENSORS_PV_VOLTAGE, sensors.data.volt.value);
             break;
-        case (SENSORS_OPTICAL_FLOW):
-            // ToDo: mit Gyro Daten korrigieren und der Fusion übergeben
-            // DEBUG
-            event->vector.x *= sensors.flow.scaleX;
-            event->vector.y *= sensors.flow.scaleY;
-            pvPublishFloat(xSensors, SENSORS_PV_FLOW_X, event->vector.x);
-            pvPublishFloat(xSensors, SENSORS_PV_FLOW_Y, event->vector.y);
-            ESP_LOGI("sensors", "%llu,F,%f,%f,%f", event->timestamp, event->vector.x, event->vector.y, event->accuracy);
-            // sensors_fuseX(event->type, event->vector.x, event->timestamp);
-            // sensors_fuseY(event->type, event->vector.y, event->timestamp);
+        case (SENSORS_OPTICAL_FLOW): {
+            // skalieren von Pixel/s -> rad/s & ggf. Achsen kehren
+            float x = event->vector.x * sensors.flow.scaleX;
+            float y = event->vector.y * sensors.flow.scaleY;
+            // mit Gyro kompensieren
+            x -= sensors.data.rotation.vector.x;
+            y -= sensors.data.rotation.vector.y;
+            // mit Höhe zu Geschwindigkeit umrechnen
+            sensors.data.flow.vector.x = tanf(x / 2.0f) * 2.0f * sensors.data.position.vector.z;
+            sensors.data.flow.vector.y = tanf(y / 2.0f) * 2.0f * sensors.data.position.vector.z;
+            sensors.data.flow.timestamp = timestamp;
+            sensors.data.flow.accuracy = event->accuracy;
+            pvPublishFloat(xSensors, SENSORS_PV_FLOW_X, sensors.data.flow.vector.x);
+            pvPublishFloat(xSensors, SENSORS_PV_FLOW_Y, sensors.data.flow.vector.y);
+            // ToDo: der Fusion übergeben
+            // ToDo: Fusion auf Flow anpassen, ggf. Fehler Flow != Fehler SpeedGPS
+            // sensors_fuseX(SENSORS_OPTICAL_FLOW, sensors.data.flow.vector.x, timestamp);
+            // sensors_fuseY(SENSORS_OPTICAL_FLOW, sensors.data.flow.vector.y, timestamp);
             break;
-        case (SENSORS_LIDAR):
-            ESP_LOGI("sensors", "%llu,L,%f", event->timestamp, event->vector.z - sensors.homes.distance);
+        }
+        case (SENSORS_LIDAR): {
+            vector_t distance = {.x = 0.0f, .y = 0.0f, .z = -event->value};
+            bno_toWorldFrame(&distance, &sensors.data.orientation.orientation);
+            sensors.data.distance.value = (-distance.z) - sensors.homes.distance;
+            sensors.data.distance.timestamp = timestamp;
             sensors_fuseZ(event->type, event->vector.z - sensors.homes.distance, event->timestamp);
             break;
+        }
         default:
             break;
     }
+    // Datenzugriff freigeben
+    xSemaphoreGive(sensors.data.lock);
+    // Timeoutkontrolle
     uint32_t timedOut = sensors.timedOut;
     sensors_resetTimeout(event->type); // Timeout des aktuellen Sensors zurücksetzen
     sensors_detectTimeout(event->timestamp); // Timeout der anderen Sensoren erkennen
@@ -408,9 +459,11 @@ static void sensors_processData(sensors_event_t *event) {
 
 static void sensors_detectTimeout(int64_t timestamp) {
     for (sensors_event_type_t i = 0; i < SENSORS_MAX; ++i) {
-        if (sensors.states[i] && ((timestamp - sensors.states[i]->timestamp) > sensors.timeout)) {
+        if (!sensors.rawData[i]) {
             sensors_setTimeout(i);
-            sensors.states[i]->timestamp = timestamp;
+        } else if ((timestamp - sensors.rawData[i]->timestamp) > sensors.timeout) {
+            sensors_setTimeout(i);
+            sensors.rawData[i]->timestamp = timestamp;
         }
     }
 }

@@ -50,6 +50,8 @@
 
 /** Compiler Einstellungen **/
 
+#define SENSORS_DATA_LOCK       10
+
 
 /** Befehle **/
 

@@ -25,7 +25,6 @@
 #include "uart.h"
 #include "sensor_types.h"
 #include "sensors.h"
-#include "bno.h"
 #include "flow.h"
 
 
@@ -180,10 +179,7 @@ static void flow_task(void* arg) {
 
 static void flow_processRange(flow_distance_t *data, int64_t timestamp) {
     if (data->quality != 255) return;
-    flow.distance.vector.z = -(data->distance / 1000.0); // mm -> m
-    // Korrigieren gemäss aktueller Orientierung
-    bno_toWorldFrame(&flow.distance.vector, NULL);
-    flow.distance.vector.z = -flow.distance.vector.z;
+    flow.distance.value = data->distance / 1000.0; // mm -> m
     flow.distance.timestamp = timestamp;
     flow.forward.data = &flow.distance;
     xQueueSendToBack(xSensors, &flow.forward, 0);
