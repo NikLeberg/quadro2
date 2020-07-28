@@ -289,7 +289,7 @@ bool sensors_init(gpio_num_t scl, gpio_num_t sda,                               
     sensors_fuseX_reset();
     eekf_init(&sensors.X.ekf, &sensors.X.x, &sensors.X.P, sensors_fuseX_transition, sensors_fuseX_measurement, NULL);
     // installiere task
-    if (xTaskCreate(&sensors_task, "sensors", 4 * 1024, NULL, xSensors_PRIORITY, NULL) != pdTRUE) return true;
+    if (xTaskCreate(&sensors_task, "sensors", 8 * 1024, NULL, xSensors_PRIORITY, NULL) != pdTRUE) return true;
     return ret;
 }
 
@@ -365,7 +365,7 @@ static void sensors_processData(sensors_event_t *event) {
     // Sensorzustand speichern
     sensors.rawData[type] = event;
     // Datenzugriff sperren
-    if (xSemaphoreTake(sensors.data.lock, SENSORS_DATA_LOCK / portTICK_PERIOD_MS) == pdFALSE) configASSERT(true);
+    if (xSemaphoreTake(sensors.data.lock, SENSORS_DATA_LOCK / portTICK_PERIOD_MS) == pdFALSE) configASSERT(false);
     // Verarbeiten
     switch (type) {
         case (SENSORS_ACCELERATION):
@@ -403,9 +403,9 @@ static void sensors_processData(sensors_event_t *event) {
             break;
         case (SENSORS_GROUNDSPEED):
             sensors.data.speed = *event;
-            sensors_fuseX(SENSORS_GROUNDSPEED, event->vector.x, timestamp);
-            sensors_fuseY(SENSORS_GROUNDSPEED, event->vector.y, timestamp);
-            // sensors_fuseZ(SENSORS_GROUNDSPEED, event->vector.z, timestamp);
+            sensors_fuseX(SENSORS_GROUNDSPEED, sensors.data.speed.vector.x, timestamp);
+            sensors_fuseY(SENSORS_GROUNDSPEED, sensors.data.speed.vector.y, timestamp);
+            // sensors_fuseZ(SENSORS_GROUNDSPEED, sensors.data.speed.vector.z, timestamp);
             break;
         case (SENSORS_VOLTAGE):
             sensors.data.volt = *event;
@@ -424,16 +424,19 @@ static void sensors_processData(sensors_event_t *event) {
             x -= sensors.data.rotation.vector.x;
             y -= sensors.data.rotation.vector.y;
             // mit Höhe zu Geschwindigkeit umrechnen
-            sensors.data.flow.vector.x = tanf(x / 2.0f) * 2.0f * sensors.data.position.vector.z;
-            sensors.data.flow.vector.y = tanf(y / 2.0f) * 2.0f * sensors.data.position.vector.z;
+            vector_t flow = {0};
+            flow.x = tanf(x / 2.0f) * 2.0f * sensors.data.position.vector.z;
+            flow.y = tanf(y / 2.0f) * 2.0f * sensors.data.position.vector.z;
+            bno_toWorldFrame(&flow, &sensors.data.orientation.orientation); // DEBUG ToDo: nur um Yaw drehen
+            sensors.data.flow.vector = flow;
             sensors.data.flow.timestamp = timestamp;
             sensors.data.flow.accuracy = event->accuracy;
             pvPublishFloat(xSensors, SENSORS_PV_FLOW_X, sensors.data.flow.vector.x);
             pvPublishFloat(xSensors, SENSORS_PV_FLOW_Y, sensors.data.flow.vector.y);
             // ToDo: der Fusion übergeben
             // ToDo: Fusion auf Flow anpassen, ggf. Fehler Flow != Fehler SpeedGPS
-            // sensors_fuseX(SENSORS_OPTICAL_FLOW, sensors.data.flow.vector.x, timestamp);
-            // sensors_fuseY(SENSORS_OPTICAL_FLOW, sensors.data.flow.vector.y, timestamp);
+            // sensors_fuseX(SENSORS_GROUNDSPEED, sensors.data.flow.vector.x, timestamp);
+            // sensors_fuseY(SENSORS_GROUNDSPEED, sensors.data.flow.vector.y, timestamp);
             break;
         }
         case (SENSORS_LIDAR): {
@@ -441,7 +444,7 @@ static void sensors_processData(sensors_event_t *event) {
             bno_toWorldFrame(&distance, &sensors.data.orientation.orientation);
             sensors.data.distance.value = (-distance.z) - sensors.homes.distance;
             sensors.data.distance.timestamp = timestamp;
-            sensors_fuseZ(event->type, event->vector.z - sensors.homes.distance, event->timestamp);
+            sensors_fuseZ(SENSORS_LIDAR, sensors.data.distance.value, timestamp);
             break;
         }
         default:
@@ -548,7 +551,9 @@ static void sensors_fuseZ(sensors_event_type_t type, float z, int64_t timestamp)
     // DEBUG
     //ESP_LOGD("sensors", "Fz,%f,%f,Z,%f,%f,%f", *EEKF_MAT_EL(sensors.Z.x, 0, 0), *EEKF_MAT_EL(sensors.Z.x, 1, 0), *EEKF_MAT_EL(sensors.Z.z, 0, 0), *EEKF_MAT_EL(sensors.Z.z, 1, 0), *EEKF_MAT_EL(sensors.Z.z, 2, 0));
     // Publish
+    sensors.data.position.vector.z = *EEKF_MAT_EL(sensors.Z.x, 0, 0);
     pvPublishFloat(xSensors, SENSORS_PV_Z, *EEKF_MAT_EL(sensors.Z.x, 0, 0));
+    sensors.data.velocity.vector.z = *EEKF_MAT_EL(sensors.Z.x, 1, 0);
     pvPublishFloat(xSensors, SENSORS_PV_VZ, *EEKF_MAT_EL(sensors.Z.x, 1, 0));
 }
 
@@ -664,7 +669,9 @@ static void sensors_fuseY(sensors_event_type_t type, float y, int64_t timestamp)
     // DEBUG
     //ESP_LOGD("sensors", "Fy,%f,%f,Z,%f,%f", *EEKF_MAT_EL(sensors.Y.x, 0, 0), *EEKF_MAT_EL(sensors.Y.x, 1, 0), *EEKF_MAT_EL(sensors.Y.z, 0, 0), *EEKF_MAT_EL(sensors.Y.z, 1, 0));
     // Publish
+    sensors.data.position.vector.y = *EEKF_MAT_EL(sensors.Y.x, 0, 0);
     pvPublishFloat(xSensors, SENSORS_PV_Y, *EEKF_MAT_EL(sensors.Y.x, 0, 0));
+    sensors.data.velocity.vector.y = *EEKF_MAT_EL(sensors.Y.x, 1, 0);
     pvPublishFloat(xSensors, SENSORS_PV_VY, *EEKF_MAT_EL(sensors.Y.x, 1, 0));
 }
 
@@ -777,7 +784,9 @@ static void sensors_fuseX(sensors_event_type_t type, float x, int64_t timestamp)
     // DEBUG
     //ESP_LOGD("sensors", "Fx,%f,%f,Z,%f,%f", *EEKF_MAT_EL(sensors.X.x, 0, 0), *EEKF_MAT_EL(sensors.X.x, 1, 0), *EEKF_MAT_EL(sensors.X.z, 0, 0), *EEKF_MAT_EL(sensors.X.z, 1, 0));
     // Publish
+    sensors.data.position.vector.x = *EEKF_MAT_EL(sensors.X.x, 0, 0);
     pvPublishFloat(xSensors, SENSORS_PV_X, *EEKF_MAT_EL(sensors.X.x, 0, 0));
+    sensors.data.velocity.vector.x = *EEKF_MAT_EL(sensors.X.x, 1, 0);
     pvPublishFloat(xSensors, SENSORS_PV_VX, *EEKF_MAT_EL(sensors.X.x, 1, 0));
 }
 
