@@ -177,7 +177,7 @@ void bno_task(void* arg) {
     bno_event_t event;
     uint16_t readLength, rxRemaining = 0;
     uint8_t timeoutCount = 0;
-    while (!bno.onRx) vTaskDelay(1); // auf sh2-Lib Registrierung (nach reset) warten
+    while (!bno.onRx) vTaskDelay(10); // auf sh2-Lib Registrierung (nach reset) warten
     // Loop
     while (true) {
         if (xQueueReceive(xBno, &event, bno.timeout) == pdTRUE) {
@@ -396,7 +396,7 @@ int sh2_hal_rx(uint8_t *pData, uint32_t len) {
 
 int sh2_hal_block(void) {
     if (xSemaphoreTake(bno.sh2Lock, BNO_STARTUP_WAIT_MS / portTICK_PERIOD_MS) == pdFALSE) {
-        ESP_LOGE("bno", "lock err %u", ++errCount);
+        configASSERT(false); // sh2 blockiert
     }
     return SH2_OK;
 }
