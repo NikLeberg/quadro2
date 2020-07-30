@@ -423,11 +423,21 @@ static void sensors_processData(sensors_event_t *event) {
             // mit Gyro kompensieren
             x -= sensors.data.rotation.vector.x;
             y -= sensors.data.rotation.vector.y;
+            ESP_LOGD("sensors", "flow 1\t%f\t%f\t%f", event->vector.x, event->vector.y, event->accuracy);
             // mit Höhe zu Geschwindigkeit umrechnen
             vector_t flow = {0};
             flow.x = tanf(x / 2.0f) * 2.0f * sensors.data.position.vector.z;
             flow.y = tanf(y / 2.0f) * 2.0f * sensors.data.position.vector.z;
-            bno_toWorldFrame(&flow, &sensors.data.orientation.orientation); // DEBUG ToDo: nur um Yaw drehen
+            // nur um Yaw Drehung korrigieren
+            orientation_t rotateZ = sensors.data.orientation.orientation;
+            float thetaZ = atan2f(rotateZ.k, rotateZ.real);
+            rotateZ.i = 0.0f;
+            rotateZ.j = 0.0f;
+            rotateZ.k = sinf(thetaZ);
+            rotateZ.real = cosf(thetaZ);
+            //bno_toWorldFrame(&flow, &rotateZ); // DEBUG ToDo: nur um Yaw drehen
+            ESP_LOGD("sensors", "flow 2\t\t\t\t\t\t\t%f\t%f\t%u", flow.x, flow.y, uxTaskGetStackHighWaterMark(NULL));
+            // kopiere Rest
             sensors.data.flow.vector = flow;
             sensors.data.flow.timestamp = timestamp;
             sensors.data.flow.accuracy = event->accuracy;
